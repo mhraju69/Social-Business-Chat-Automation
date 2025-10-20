@@ -14,11 +14,12 @@ from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+import os
+from dotenv import load_dotenv
 
+load_dotenv()  # Load environment variables from .env file
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
-
+AI_TOKEN = os.getenv('AI_TOKEN')
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-7#$m=&$%3a_op)s4yr7qy2+424rs4#)2xi%9nj$in&0-*xqdmf'
 
@@ -28,6 +29,7 @@ DEBUG = True
 # Application definition
 
 INSTALLED_APPS = [
+    'unfold',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -37,6 +39,7 @@ INSTALLED_APPS = [
     'rest_framework',
     'Accounts',
     'Whatsapp',
+    'Facebook',
 ]
 
 MIDDLEWARE = [

@@ -32,7 +32,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     email = models.EmailField(max_length=255,unique=True,verbose_name="User Email")
     image = models.ImageField(upload_to='profile_images/', blank=True, null=True,) #storage=MediaCloudinaryStorage()
     phone = models.CharField(max_length=20, blank=True, null=True)
-    dob = models.DateField(blank=True, null=True)
+    dob = models.DateField(blank=True, null=True,verbose_name="Date of Birs")
     is_active = models.BooleanField(default=False,verbose_name="Active User")
     is_staff = models.BooleanField(default=False,verbose_name="Staff User")  
     is_superuser = models.BooleanField(default=False,verbose_name="Super User")  

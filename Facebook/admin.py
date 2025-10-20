@@ -3,14 +3,14 @@ from .models import *
 from unfold.admin import ModelAdmin
 # Register your models here.
 
-@admin.register(WhatsAppProfile)
+@admin.register(FacebookProfile)
 class WPAdmin(ModelAdmin):
     pass
 
 @admin.register(Incoming)
 class IncomingAdmin(ModelAdmin):
-    readonly_fields = ("receiver","from_number","text")
+    readonly_fields = ("receiver","from_user_id","text")
 
 @admin.register(Outgoing)
 class OutgoingAdmin(ModelAdmin):
-    readonly_fields = ("sender","to_number","text")
+    readonly_fields = ("sender","to_user_id","text")

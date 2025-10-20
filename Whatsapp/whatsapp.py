@@ -3,13 +3,13 @@ from django.views.decorators.csrf import csrf_exempt
 import json
 import requests
 from .models import WhatsAppProfile, Incoming, Outgoing
-
+from django.conf import settings
 from openai import OpenAI
 
 # Initialize OpenAI
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
-    api_key="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",
+    api_key= settings.AI_TOKEN,
 )
 
 def generate_ai_response(user_message):
@@ -47,11 +47,10 @@ def send_whatsapp_message(profile: WhatsAppProfile, to, message):
 
         # Store outgoing message in DB
         Outgoing.objects.create(
-            account=profile,
+            sender=profile,
             to_number=to,
             text=message,
-            whatsapp_message_id=res_data.get("messages", [{}])[0].get("id"),
-            status="sent"
+            message_id=res_data.get("messages", [{}])[0].get("id"),
         )
 
         print("✅ WhatsApp message sent successfully!")
@@ -59,10 +58,9 @@ def send_whatsapp_message(profile: WhatsAppProfile, to, message):
     except Exception as e:
         print("❌ Error sending WhatsApp message:", e)
         Outgoing.objects.create(
-            account=profile,
+            sender=profile,
             to_number=to,
             text=message,
-            status="failed"
         )
         return {"error": str(e)}
 

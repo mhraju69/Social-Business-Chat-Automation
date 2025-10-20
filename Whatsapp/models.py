@@ -18,7 +18,8 @@ class WhatsAppProfile(models.Model):
         return f"{self.user.email} - {self.number_id}"
 
     class Meta:
-        verbose_name = 'Profile'
+        verbose_name = 'WhatsApp Profile'
+        verbose_name_plural =  'WhatsApp Profiles'
 
 
 class Incoming(models.Model):
@@ -31,16 +32,22 @@ class Incoming(models.Model):
 
     def __str__(self):
         return f"From {self.from_number} at {self.timestamp}"
+    class Meta:
+        verbose_name = 'Incoming Message'
+        verbose_name_plural = 'Incoming Messages'
 
 
 class Outgoing(models.Model):
-    account = models.ForeignKey(
+    sender = models.ForeignKey(
         WhatsAppProfile, on_delete=models.CASCADE, related_name='outgoing_messages'
     )
     to_number = models.CharField(max_length=20)
     text = models.TextField()
-    whatsapp_message_id = models.CharField(max_length=100, blank=True, null=True)
+    message_id = models.CharField(max_length=100, blank=True, null=True)
     timestamp = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"To {self.to_number} at {self.timestamp} - {self.status}"
+        return f"To {self.to_number} at {self.timestamp}"
+    class Meta:
+        verbose_name = 'Outgoing Message'
+        verbose_name_plural = 'Outgoing Messages'
