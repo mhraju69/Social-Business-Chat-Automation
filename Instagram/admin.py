@@ -3,8 +3,8 @@ from .models import *
 from unfold.admin import ModelAdmin
 # Register your models here.
 
-@admin.register(FacebookProfile)
-class FbAdmin(ModelAdmin):
+@admin.register(InstagramProfile)
+class IgAdmin(ModelAdmin):
     pass
 
 @admin.register(Incoming)

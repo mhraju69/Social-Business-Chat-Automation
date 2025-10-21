@@ -20,11 +20,18 @@ from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file
 
 AI_TOKEN = os.getenv('AI_TOKEN')
+FB_APP_ID = os.getenv('FB_APP_ID')
+FB_APP_SECRET = os.getenv('FB_APP_SECRET')
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-7#$m=&$%3a_op)s4yr7qy2+424rs4#)2xi%9nj$in&0-*xqdmf'
 
 # SECURITY WARNING: don't run with debug turned on in production!
 ALLOWED_HOSTS = ['*']
+# settings.py
+CSRF_TRUSTED_ORIGINS = [
+    "https://ape-in-eft.ngrok-free.app",
+]
+
 DEBUG = True
 # Application definition
 
@@ -40,6 +47,7 @@ INSTALLED_APPS = [
     'Accounts',
     'Whatsapp',
     'Facebook',
+    'Instagram',
 ]
 
 MIDDLEWARE = [
