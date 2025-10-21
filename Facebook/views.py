@@ -5,6 +5,7 @@ from django.conf import settings
 from .models import FacebookProfile
 from django.contrib.auth import get_user_model
 from django.shortcuts import redirect
+from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny,IsAuthenticated
 User = get_user_model()
@@ -25,7 +26,7 @@ class FacebookConnectView(APIView):
         redirect_uri = "https://ape-in-eft.ngrok-free.app/facebook/callback/"
         scope = "pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging"
         state = 2
-        # state = request.user
+        # state = request.user.id
 
         fb_login_url = (
             f"https://www.facebook.com/v20.0/dialog/oauth"
@@ -36,8 +37,11 @@ class FacebookConnectView(APIView):
         )
 
         return redirect(fb_login_url)
+        
+from rest_framework.decorators import api_view,permission_classes
 
-
+@api_view(['GET'])
+@permission_classes([AllowAny])
 def facebook_callback(request):
     """
     Callback after Facebook login.
@@ -100,4 +104,4 @@ def facebook_callback(request):
         )
         saved_pages.append({"id": page_id, "name": page_name})
 
-    return redirect('/')
+    return  Response({"status": "success", "accounts": saved_pages})

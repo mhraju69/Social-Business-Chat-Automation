@@ -70,6 +70,7 @@
             box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
             position: relative;
             overflow: hidden;
+            text-decoration: none;
         }
         
         .btn:before {
@@ -236,10 +237,10 @@
                 Connect Facebook
             </a>
             
-            <span href="{% url 'facebook_connect' %}" class="btn btn-instagram" id="instagramBtn">
+            <a href="{% url 'instagram_connect' %}" class="btn btn-instagram" id="instagramBtn">
                 <i class="fab fa-instagram"></i>
                 Connect Instagram
-            </span>
+            </a>
         </div>
     </div>
 </body>

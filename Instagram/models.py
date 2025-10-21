@@ -12,11 +12,9 @@ class InstagramProfile(models.Model):
         User, on_delete=models.CASCADE, related_name='instagram_profiles'
     )
     instagram_id = models.CharField(max_length=100, unique=True)          # Instagram Business Account ID
-    username = models.CharField(max_length=150, blank=True, null=True)    # IG Username (optional)
     page = models.ForeignKey(
         FacebookProfile, on_delete=models.CASCADE,
         related_name='connected_instagram_accounts',
-        null=True, blank=True, help_text="Linked Facebook Page"
     )
     access_token = models.TextField()                                     # Page access token with IG permissions
     bot_active = models.BooleanField(default=True)
