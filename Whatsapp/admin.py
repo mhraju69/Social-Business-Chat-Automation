@@ -6,11 +6,17 @@ from unfold.admin import ModelAdmin
 @admin.register(WhatsAppProfile)
 class WPAdmin(ModelAdmin):
     pass
+@admin.register(WhatsAppClient)
+class WPCAdmin(ModelAdmin):
+    pass
 
 @admin.register(Incoming)
 class IncomingAdmin(ModelAdmin):
-    readonly_fields = ("receiver","from_number","text")
+    pass
 
 @admin.register(Outgoing)
 class OutgoingAdmin(ModelAdmin):
-    readonly_fields = ("sender","to_number","text")
+    pass
+@admin.register(WPRoom)
+class RoomAdmin(ModelAdmin):
+    pass

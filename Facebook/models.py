@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.db import models
-
+from encrypted_model_fields.fields import EncryptedCharField
 User = get_user_model()
 
 
@@ -12,7 +12,7 @@ class FacebookProfile(models.Model):
         User, on_delete=models.CASCADE, related_name='facebook_profiles'
     )
     page_id = models.CharField(max_length=100, unique=True)           # Facebook Page ID
-    page_access_token = models.TextField()                            # Page access token
+    page_access_token = EncryptedCharField(max_length=5000)                            # Page access token
     bot_active = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.db import models
 from Facebook.models import *
 User = get_user_model()
+from encrypted_model_fields.fields import EncryptedCharField
 
 
 # ============================
@@ -16,7 +17,7 @@ class InstagramProfile(models.Model):
         FacebookProfile, on_delete=models.CASCADE,
         related_name='connected_instagram_accounts',
     )
-    access_token = models.TextField()                                     # Page access token with IG permissions
+    access_token = EncryptedCharField(max_length=5000)                          # Page access token with IG permissions
     bot_active = models.BooleanField(default=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

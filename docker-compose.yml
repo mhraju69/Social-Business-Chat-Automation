@@ -1,0 +1,21 @@
+version: '3'
+
+services:
+  web:
+    build: .
+    container_name: talkfusion_web
+    command: gunicorn Talkfusion.asgi:application -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers 4
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    environment:
+      - DJANGO_SETTINGS_MODULE=Talkfusion.settings
+
+  redis:
+    image: redis:7
+    container_name: talkfusion_redis
+    ports:
+      - "6379:6379"

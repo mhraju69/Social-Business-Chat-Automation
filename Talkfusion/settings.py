@@ -22,6 +22,8 @@ load_dotenv()  # Load environment variables from .env file
 AI_TOKEN = os.getenv('AI_TOKEN')
 FB_APP_ID = os.getenv('FB_APP_ID')
 FB_APP_SECRET = os.getenv('FB_APP_SECRET')
+FIELD_ENCRYPTION_KEY = os.getenv('FIELD_ENCRYPTION_KEY').encode()
+
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-7#$m=&$%3a_op)s4yr7qy2+424rs4#)2xi%9nj$in&0-*xqdmf'
 
@@ -36,6 +38,7 @@ DEBUG = True
 # Application definition
 
 INSTALLED_APPS = [
+    "daphne",
     'unfold',
     'django.contrib.admin',
     'django.contrib.auth',
@@ -44,10 +47,12 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'channels',
     'Accounts',
     'Whatsapp',
     'Facebook',
     'Instagram',
+    'Chat',
 ]
 
 MIDDLEWARE = [
@@ -125,7 +130,11 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+# Where Django will collect static files
+STATIC_ROOT = os.path.join(BASE_DIR, "staticfiles")
+
+# Your existing settings
+STATIC_URL = "/static/"
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -143,3 +152,21 @@ REST_FRAMEWORK = {
 }
 
 AUTH_USER_MODEL = 'Accounts.User'
+
+ASGI_APPLICATION = "Talkfusion.asgi.application"
+
+# CHANNEL_LAYERS = {
+#     "default": {
+#         "BACKEND": "channels.layers.InMemoryChannelLayer",
+#     },
+# }
+
+
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("redis", 6379)],  # or your Redis server IP
+        },
+    },
+}
