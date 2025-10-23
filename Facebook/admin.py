@@ -9,8 +9,14 @@ class FbAdmin(ModelAdmin):
 
 @admin.register(Incoming)
 class IncomingAdmin(ModelAdmin):
-    readonly_fields = ("receiver","from_user_id","text")
-
+    pass
 @admin.register(Outgoing)
 class OutgoingAdmin(ModelAdmin):
-    readonly_fields = ("sender","to_user_id","text")
+    pass
+@admin.register(FacebookClient)
+class FacebookClientAdmin(ModelAdmin):
+    pass
+
+@admin.register(FBRoom)
+class FBRAdmin(ModelAdmin):
+    pass

@@ -4,9 +4,6 @@ from encrypted_model_fields.fields import EncryptedCharField
 User = get_user_model()
 
 
-# ============================
-# 🔹 Facebook Profile Model
-# ============================
 class FacebookProfile(models.Model):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='facebook_profiles'
@@ -25,41 +22,46 @@ class FacebookProfile(models.Model):
         verbose_name = 'Facebook Profile'
         verbose_name_plural = 'Facebook Profiles'
 
+class FacebookClient(models.Model):
+    user_id = models.CharField(max_length=100, unique=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    def __str__(self):
+        return self.user_id
 
-# ============================
-# 🔹 Incoming Messages
-# ============================
+
 class Incoming(models.Model):
     receiver = models.ForeignKey(
         FacebookProfile, on_delete=models.CASCADE, related_name='incoming_messages'
     )
-    from_user_id = models.CharField(max_length=100)                   # Sender (Facebook User ID)
+    client =models.ForeignKey(FacebookClient, related_name='fbiclient', on_delete=models.CASCADE,null=True,blank=True)
     text = models.TextField()
     timestamp = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"From {self.from_user_id} at {self.timestamp}"
-
+        return f"From {self.client.user_id} at {self.timestamp}"
     class Meta:
         verbose_name = 'Incoming Message'
         verbose_name_plural = 'Incoming Messages'
 
-
-# ============================
-# 🔹 Outgoing Messages
-# ============================
 class Outgoing(models.Model):
     sender = models.ForeignKey(
         FacebookProfile, on_delete=models.CASCADE, related_name='outgoing_messages'
     )
-    to_user_id = models.CharField(max_length=100)                     # Recipient (Facebook User ID)
+    client =models.ForeignKey(FacebookClient, related_name='fboclient', on_delete=models.CASCADE,null=True,blank=True)
     text = models.TextField()
-    message_id = models.CharField(max_length=150, blank=True, null=True)
+    message_id = models.CharField(max_length=100, blank=True, null=True)
     timestamp = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f"To {self.to_user_id} at {self.timestamp}"
-
+        return f"To {self.client.user_id} at {self.timestamp}"
     class Meta:
         verbose_name = 'Outgoing Message'
         verbose_name_plural = 'Outgoing Messages'
+
+
+class FBRoom(models.Model):
+    user = models.ForeignKey(FacebookProfile, related_name='room_user', on_delete=models.CASCADE)
+    client = models.ForeignKey(FacebookClient, related_name='room_client', on_delete=models.CASCADE)
+
+    class Meta:
+        unique_together = ('user', 'client')
