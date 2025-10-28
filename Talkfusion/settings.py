@@ -33,6 +33,8 @@ ALLOWED_HOSTS = ['*']
 # settings.py
 CSRF_TRUSTED_ORIGINS = [
     "https://ape-in-eft.ngrok-free.app",
+    'http://localhost:8080',
+    'http://127.0.0.1:8080'
 ]
 
 DEBUG = True
@@ -54,6 +56,7 @@ INSTALLED_APPS = [
     'Instagram',
     'Chat',
     'Others',
+    'Api',
 ]
 
 MIDDLEWARE = [
