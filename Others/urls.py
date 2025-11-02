@@ -19,4 +19,5 @@ urlpatterns = [
     path("boking/today/<int:company_id>", SocialAuthCallbackView.as_view()),
     path('stripe/', StripeListCreateView.as_view(), name='stripe-list-create'),
     path('stripe/update/', StripeUpdateView.as_view(), name='stripe-list-create'),
+    path('dashboard/', DashboardView.as_view(), name='dashboard')
 ]

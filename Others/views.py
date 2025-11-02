@@ -3,6 +3,8 @@ from google_auth_oauthlib.flow import Flow
 from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status, views,permissions,generics
+from rest_framework.views import APIView 
+
 from django.views.decorators.csrf import csrf_exempt
 from .models import *
 from google.oauth2.credentials import Credentials
@@ -424,3 +426,18 @@ class StripeUpdateView(generics.UpdateAPIView):
 
         return stripe_obj
     
+class DashboardView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        timezone_param = request.query_params.get('timezone', None)
+        serializer = DashboardSerializer(
+            instance={},  # Pass a dummy instance
+            context={
+                'request': request,
+                'timezone': timezone_param
+            }
+        )
+        
+        response_data = serializer.data
+        return Response(response_data)

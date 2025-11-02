@@ -4,7 +4,8 @@ from django.contrib.auth import get_user_model
 from Accounts.models import * 
 User = get_user_model()
 from django.utils import timezone
-from datetime import datetime, timedelta
+from datetime import  timedelta
+import pytz
 
 class Booking(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='bookings', null=True, blank=True)
@@ -17,21 +18,69 @@ class Booking(models.Model):
     event_link = models.URLField(blank=True, null=True)
     
     def __str__(self):
-        return f'{self.user.email} - {self.start_time}'
+        return f'{self.company.name} - {self.start_time}'
 
     @classmethod
-    def meetings_today(cls, user):
-        # Always use UTC now
+    def meetings_today(cls, company, timezone_name=None):
+
+        
+        # Use provided timezone or fall back to company timezone
+        tz_name = timezone_name or getattr(company, 'timezone', 'UTC')
+        company_tz = pytz.timezone(tz_name)
+
+        # Get current time in company timezone
         now_utc = timezone.now()
-
-        start_of_day = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        now_local = now_utc.astimezone(company_tz)
+        
+        # Calculate start and end of day in local time
+        start_of_day = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         end_of_day = start_of_day + timedelta(days=1)
+        
+        # Convert to UTC for database query
+        start_utc = start_of_day.astimezone(pytz.UTC)
+        end_utc = end_of_day.astimezone(pytz.UTC)
 
-        return cls.objects.filter(
-            user=user,
-            start_time__gte=start_of_day,
-            start_time__lt=end_of_day
-        ).count()
+        # Query bookings
+        qs = cls.objects.filter(
+            company=company,
+            start_time__gte=start_utc,
+            start_time__lt=end_utc
+        )
+
+        if qs.exists():
+            for booking in qs:
+                local_time = booking.start_time.astimezone(company_tz)
+        
+        return qs
+
+    @classmethod
+    def new_meetings(cls, company, timezone_name=None):
+
+        
+        # Use provided timezone or fall back to company timezone
+        tz_name = timezone_name or getattr(company, 'timezone', 'UTC')
+        company_tz = pytz.timezone(tz_name)
+
+        # Get current time in company timezone
+        now_utc = timezone.now()
+        now_local = now_utc.astimezone(company_tz)
+        
+        # Calculate start of tomorrow in local time
+        tomorrow_start = (now_local + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        tomorrow_start_utc = tomorrow_start.astimezone(pytz.UTC)
+
+
+        # Query bookings
+        qs = cls.objects.filter(
+            company=company,
+            start_time__gte=tomorrow_start_utc
+        )
+
+        if qs.exists():
+            for booking in qs:
+                local_time = booking.start_time.astimezone(company_tz)
+        
+        return qs    
 
 class FAQ(models.Model):
     question = models.TextField()   
