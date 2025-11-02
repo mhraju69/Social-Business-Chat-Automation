@@ -41,13 +41,23 @@ class StripeSerializer(serializers.ModelSerializer):
 
         return Stripe.objects.create(company=company, **validated_data)
 
-from rest_framework import serializers
-from Others.models import Booking, Company
+class PaymentSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Payment
+        fields = [
+            'id',
+            'reason',
+            'amount',
+            'transaction_id',
+            'payment_date',
+        ]
 
 class DashboardSerializer(serializers.Serializer):
     meetings_today_count = serializers.SerializerMethodField()
     meetings_today_list = serializers.SerializerMethodField()
     upcoming_meetings_count = serializers.SerializerMethodField()
+    payments_today_total = serializers.SerializerMethodField()
+    payments_today_list = serializers.SerializerMethodField()
 
     def _get_company(self):
         """Get company associated with the user"""
@@ -109,4 +119,31 @@ class DashboardSerializer(serializers.Serializer):
         qs = Booking.new_meetings(company=company, timezone_name=tz_name)
         count = qs.count()
         return count
+    
+    def get_payments_today_list(self, obj):
+        company = self._get_company()
+        if not company:
+            return []
+        
+        tz_name = self._get_timezone(company)
+        qs = Payment.payments_today(company=company, timezone_name=tz_name).order_by('-payment_date')
+        count = qs.count()
+        
+        if count > 0:
+            for payment in qs:
+                print(f"  💵 {payment.reason}: ${payment.amount} - TXN: {payment.transaction_id}")
+        
+        return PaymentSerializer(qs, many=True).data
 
+    def get_payments_today_total(self, obj):
+        company = self._get_company()
+        if not company:
+            return 0
+        
+        tz_name = self._get_timezone(company)
+        qs = Payment.payments_today(company=company, timezone_name=tz_name)
+        
+        from django.db.models import Sum
+        total = qs.aggregate(total=Sum('amount'))['total'] or 0
+                
+        return float(total)

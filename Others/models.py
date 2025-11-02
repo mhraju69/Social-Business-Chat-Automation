@@ -154,14 +154,43 @@ class Payment(models.Model):
         related_name='payments',  
         on_delete=models.CASCADE
     )
-    plan = models.ForeignKey(
-        SubscriptionPlan,
-        related_name='plan_payments',  
-        on_delete=models.CASCADE
-    )
+    reason = models.CharField(max_length=255, verbose_name="Payment Reason")
     amount = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Payment Amount")
     transaction_id = models.CharField(max_length=100, verbose_name="Transaction ID")
     payment_date = models.DateTimeField(auto_now_add=True, verbose_name="Payment Date")
 
     def __str__(self):
-        return f"Payment {self.transaction_id} by {self.user.email}"
+        return f"Payment {self.transaction_id} by {self.company.name}"
+    
+    @classmethod
+    def payments_today(cls, company, timezone_name=None):        
+        # Use provided timezone or fall back to company timezone
+        tz_name = timezone_name or getattr(company, 'timezone', 'UTC')
+        company_tz = pytz.timezone(tz_name)
+
+        # Get current time in company timezone
+        now_utc = timezone.now()
+        now_local = now_utc.astimezone(company_tz)
+        
+        # Calculate start and end of day in local time
+        start_of_day = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = start_of_day + timedelta(days=1)
+        
+        # Convert to UTC for database query
+        start_utc = start_of_day.astimezone(pytz.UTC)
+        end_utc = end_of_day.astimezone(pytz.UTC)
+
+        # Query payments
+        qs = cls.objects.filter(
+            company=company,
+            payment_date__gte=start_utc,
+            payment_date__lt=end_utc
+        )
+
+        if qs.exists():
+            total_amount = 0
+            for payment in qs:
+                local_time = payment.payment_date.astimezone(company_tz)
+                total_amount += payment.amount
+        
+        return qs
