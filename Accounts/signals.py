@@ -1,0 +1,10 @@
+from django.db.models.signals import post_save
+from django.dispatch import receiver
+from django.conf import settings
+from .models import Company
+
+@receiver(post_save, sender=settings.AUTH_USER_MODEL)
+def create_company_for_new_user(sender, instance, created, **kwargs):
+    if created:
+    # Automatically create a company for the new user
+        Company.objects.create(user=instance, name=f"{instance.username}'s Company")

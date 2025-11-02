@@ -1,6 +1,7 @@
 # serializers.py
 from rest_framework import serializers
-from .models import User
+from .models import *
+# from Others.models import Company
 from .utils import send_otp
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -61,3 +62,10 @@ class LoginSerializer(serializers.Serializer):
             "refresh": str(refresh),
             "access": str(refresh.access_token),
         }  
+    
+class CompanySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Company
+        fields = "__all__"
+        
+        read_only_fields = ['user']

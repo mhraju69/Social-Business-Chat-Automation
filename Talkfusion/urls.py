@@ -12,8 +12,9 @@ from django.views.generic import RedirectView
 
 
 urlpatterns = [
-    path('admin/', admin.site.urls),
-    path('api/', include('Api.urls')),
+    path('admin/', admin.site.urls),    
+    path('api/', include('Others.urls')),
+    path('api/auth/', include('Accounts.urls')),
     path('connect/', Connect),
     path('webhook/wp/', whatsapp_webhook),
     path('webhook/fb/', facebook_webhook),

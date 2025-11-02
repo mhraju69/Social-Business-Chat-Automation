@@ -3,9 +3,11 @@ from django.db import models
 from django.contrib.auth import get_user_model
 from Accounts.models import * 
 User = get_user_model()
+from django.utils import timezone
+from datetime import datetime, timedelta
 
 class Booking(models.Model):
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='bookings')
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='bookings', null=True, blank=True)
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
     start_time = models.DateTimeField()
@@ -17,6 +19,20 @@ class Booking(models.Model):
     def __str__(self):
         return f'{self.user.email} - {self.start_time}'
 
+    @classmethod
+    def meetings_today(cls, user):
+        # Always use UTC now
+        now_utc = timezone.now()
+
+        start_of_day = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = start_of_day + timedelta(days=1)
+
+        return cls.objects.filter(
+            user=user,
+            start_time__gte=start_of_day,
+            start_time__lt=end_of_day
+        ).count()
+
 class FAQ(models.Model):
     question = models.TextField()   
     answer = models.TextField()
@@ -24,52 +40,6 @@ class FAQ(models.Model):
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-
-class Company(models.Model):
-    name = models.CharField(max_length=255)
-    industry = models.CharField(max_length=100, blank=True, null=True)
-    description = models.TextField(blank=True, null=True)
-
-    open = models.TimeField(blank=True, null=True)
-    close = models.TimeField(blank=True, null=True)
-    is_24_hours_open = models.BooleanField(default=False)
-
-    address = models.CharField(max_length=255, blank=True, null=True)
-    city = models.CharField(max_length=100, blank=True, null=True)
-    country = models.CharField(max_length=100, blank=True, null=True)
-
-    # Map preview could be integrated later via coordinates
-    latitude = models.CharField(max_length=100, blank=True, null=True)
-    longitude = models.CharField(max_length=100, blank=True, null=True)
-
-    # Dynamic service list
-    services = models.JSONField(default=list, blank=True)  # e.g. [{"name": "SEO Setup", "price": 49.99}]
-
-    # Tone & Personality
-    formality_level = models.PositiveIntegerField(default=5)  # 1–10 scale
-
-    # AI training
-    training_files = models.FileField(upload_to='ai_training/', blank=True, null=True)
-
-    # Website link
-    website = models.URLField(blank=True, null=True)
-
-    # Company summary
-    summary = models.TextField(blank=True, null=True)
-
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return self.name
-    
-class PaymentMethod(models.Model):
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='payment_methods')
-    stripe_public_key = models.CharField(max_length=255)
-    stripe_secret_key = models.CharField(max_length=255)
-
-    def __str__(self):
-        return f'Payment method of {self.company}'
     
 class SubscriptionPlan(models.Model):
     CYCLE = {
@@ -91,7 +61,58 @@ class Subscription(models.Model):
     start_date = models.DateTimeField(auto_now_add=True)
     end_date = models.DateTimeField()
     is_active = models.BooleanField(default=True)
-
+    auto_renew = models.BooleanField(default=True)
     def __str__(self):
         return f'{self.user.email} - {self.plan.name}'
 
+class GoogleAccount(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    access_token = models.TextField()
+    refresh_token = models.TextField()
+    token_uri = models.TextField(default='https://oauth2.googleapis.com/token')
+    client_id = models.TextField()
+    client_secret = models.TextField()
+    scopes = models.JSONField(default=list)
+
+    def __str__(self):
+        return f"{self.user.username} - Google Connected"
+    
+class ChatBot(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, 
+        related_name='chat_bots',  
+        on_delete=models.CASCADE
+    )
+    name = models.CharField(max_length=100, verbose_name="Bot Name")
+    language = models.CharField(max_length=50,default='English', verbose_name="Bot Language")
+    description = models.TextField(blank=True, null=True, verbose_name="Bot Description")
+    is_active = models.BooleanField(default=False, verbose_name="Is Bot Active")
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.name} - {self.user.email}"
+    
+class Stripe(models.Model):
+    company = models.OneToOneField(Company,related_name='stripe',  on_delete=models.CASCADE)
+    api_key = models.CharField(max_length=255, verbose_name="Stripe API Key")
+    publishable_key = models.CharField(max_length=255, verbose_name="Stripe Publishable Key")
+    webhook_secret = models.CharField(max_length=255, verbose_name="Stripe Webhook Secret")
+
+class Payment(models.Model):
+    company = models.ForeignKey(
+        Company,
+        related_name='payments',  
+        on_delete=models.CASCADE
+    )
+    plan = models.ForeignKey(
+        SubscriptionPlan,
+        related_name='plan_payments',  
+        on_delete=models.CASCADE
+    )
+    amount = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Payment Amount")
+    transaction_id = models.CharField(max_length=100, verbose_name="Transaction ID")
+    payment_date = models.DateTimeField(auto_now_add=True, verbose_name="Payment Date")
+
+    def __str__(self):
+        return f"Payment {self.transaction_id} by {self.user.email}"

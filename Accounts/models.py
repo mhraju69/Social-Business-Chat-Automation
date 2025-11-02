@@ -62,28 +62,48 @@ class User(AbstractBaseUser, PermissionsMixin):
         super().save(*args, **kwargs)
 
 class Company(models.Model):
-    # Basic company info
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='company')
+    user = models.ForeignKey(
+        User, on_delete=models.CASCADE, related_name='company'
+    )
     name = models.CharField(max_length=255)
-    website = models.URLField(blank=True, null=True)
+    industry = models.CharField(max_length=100, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
-    
-    # Logo and branding
-    logo = models.ImageField(upload_to='company_logos/', blank=True, null=True)
-    
-    # Subscription / billing
-    plan_name = models.CharField(max_length=50, default='free')
-    plan_status = models.CharField(max_length=20, default='deactive')
-    subscription_start = models.DateTimeField(blank=True, null=True)
-    subscription_end = models.DateTimeField(blank=True, null=True)
-    stripe_customer_id = models.CharField(max_length=255, blank=True, null=True)  # for future billing
-    
+
+    open = models.TimeField(blank=True, null=True)
+    close = models.TimeField(blank=True, null=True)
+    is_24_hours_open = models.BooleanField(default=False)
+
+    address = models.CharField(max_length=255, blank=True, null=True)
+    city = models.CharField(max_length=100, blank=True, null=True)
+    country = models.CharField(max_length=100, blank=True, null=True)
+
+    # Map preview could be integrated later via coordinates
+    latitude = models.CharField(max_length=100, blank=True, null=True)
+    longitude = models.CharField(max_length=100, blank=True, null=True)
+
+    system_language = models.CharField(max_length=50, default='English')
+    # Dynamic service list
+    services = models.JSONField(default=list, blank=True)  # e.g. [{"name": "SEO Setup", "price": 49.99}]
+
+    # Tone & Personality
+    formality_level = models.PositiveIntegerField(default=5)  # 1–10 scale
+
+    # AI training
+    training_files = models.FileField(upload_to='ai_training/', blank=True, null=True)
+
+    # Website link
+    website = models.URLField(blank=True, null=True)
+
+    # Company summary
+    summary = models.TextField(blank=True, null=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+    refresh_token = models.TextField(blank=True, null=True)  # For Google Calendar integration
+
     def __str__(self):
         return self.name
-    
+     
 class OTP(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, 

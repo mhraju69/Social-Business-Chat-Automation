@@ -56,7 +56,6 @@ INSTALLED_APPS = [
     'Instagram',
     'Chat',
     'Others',
-    'Api',
 ]
 
 MIDDLEWARE = [
