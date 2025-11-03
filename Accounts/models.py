@@ -82,8 +82,6 @@ class Company(models.Model):
     longitude = models.CharField(max_length=100, blank=True, null=True)
 
     system_language = models.CharField(max_length=50, default='English')
-    # Dynamic service list
-    services = models.JSONField(default=list, blank=True)  # e.g. [{"name": "SEO Setup", "price": 49.99}]
 
     # Tone & Personality
     formality_level = models.PositiveIntegerField(default=5)  # 1–10 scale
@@ -125,3 +123,22 @@ class OTP(models.Model):
     def is_expired(self):
         return self.created_at + timedelta(minutes=3) < timezone.now()
 
+class Service(models.Model):
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='services')
+    name = models.CharField(max_length=255, verbose_name="Service Name")
+    description = models.TextField(blank=True, null=True, verbose_name="Service Description")
+    price = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Service Price")
+    duration_minutes = models.PositiveIntegerField(verbose_name="Service Duration (minutes)", default=60)
+
+    def __str__(self):
+        return self.name
+
+class CompanyInfo(models.Model):
+    company = models.OneToOneField(Company, on_delete=models.CASCADE, related_name='info')
+    name = models.TextField(blank=True, null=True)
+    details = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Info for {self.company.name}"

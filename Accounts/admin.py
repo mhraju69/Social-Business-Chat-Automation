@@ -5,3 +5,5 @@ from .models import *
 
 admin.site.register(User,ModelAdmin)
 admin.site.register(Company,ModelAdmin)
+admin.site.register(Service,ModelAdmin)
+

@@ -10,9 +10,12 @@ import pytz
 class Booking(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='bookings', null=True, blank=True)
     title = models.CharField(max_length=255)
-    description = models.TextField(blank=True)
     start_time = models.DateTimeField()
     end_time = models.DateTimeField(blank=True, null=True)
+    client = models.CharField(max_length=255,blank=True, null=True)
+    location = models.CharField(max_length=255,blank=True, null=True)
+    price = models.CharField(max_length=100, blank=True, null=True)
+    notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     google_event_id = models.CharField(max_length=255, blank=True, null=True)
     event_link = models.URLField(blank=True, null=True)

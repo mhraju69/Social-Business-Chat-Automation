@@ -223,3 +223,43 @@ class CompanyDetailUpdateView(generics.RetrieveUpdateAPIView):
             raise NotFound("No company found for this user.")
         return company
     
+class ServiceListCreateView(generics.ListCreateAPIView):
+    serializer_class = ServiceSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        return Service.objects.filter(company=self.request.user.company.first())
+
+    def perform_create(self, serializer):
+        serializer.save(company=self.request.user.company)
+
+class ServiceRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = ServiceSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_queryset(self):
+        # Only allow access to services belonging to the user’s company
+        return Service.objects.filter(company=self.request.user.company.first())
+
+class CompanyInfoCreateView(generics.ListCreateAPIView):
+    serializer_class = CompanyInfoSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def perform_create(self, serializer):
+        serializer.save(company=self.request.user.company)
+    def get_queryset(self):
+        return CompanyInfo.objects.filter(company=self.request.user.company.first())
+
+class CompanyInfoRetrieveUpdateView(generics.RetrieveUpdateDestroyAPIView):
+    serializer_class = CompanyInfoSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get_object(self):
+        # Get or raise error if company has no info yet
+        company = self.request.user.company.first()
+        try:
+            return CompanyInfo.objects.get(company=company)
+        except CompanyInfo.DoesNotExist:
+            from rest_framework.exceptions import NotFound
+            raise NotFound("No company info found for this company.")
+    

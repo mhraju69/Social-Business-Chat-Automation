@@ -441,3 +441,32 @@ class DashboardView(views.APIView):
         
         response_data = serializer.data
         return Response(response_data)
+    
+class AnalyticsView(views.APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        print("\n" + "="*80)
+        print("📊 [DEBUG] Analytics API called")
+        print(f"👤 [DEBUG] User: {request.user}")
+        print(f"🌐 [DEBUG] Query params: {request.query_params}")
+        print("="*80 + "\n")
+        
+        # Get timezone from query params
+        timezone_param = request.query_params.get('timezone', 'UTC')
+        
+        serializer = AnalyticsSerializer(
+            instance={},
+            context={
+                'request': request,
+                'timezone': timezone_param
+            }
+        )
+        
+        response_data = serializer.data
+        print("\n" + "="*80)
+        print("📤 [DEBUG] Analytics Response:")
+        print(response_data)
+        print("="*80 + "\n")
+        
+        return Response(response_data)
