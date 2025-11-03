@@ -21,4 +21,6 @@ urlpatterns = [
     path('stripe/update/', StripeUpdateView.as_view(), name='stripe-list-create'),
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
     path('analytics/', AnalyticsView.as_view(), name='analytics'),
+    path('log/', UserActivityLogView.as_view(), name='user-activity-log'),
+
 ]

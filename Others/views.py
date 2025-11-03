@@ -4,7 +4,7 @@ from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status, views,permissions,generics
 from rest_framework.views import APIView 
-
+from rest_framework.permissions import IsAuthenticated
 from django.views.decorators.csrf import csrf_exempt
 from .models import *
 from google.oauth2.credentials import Credentials
@@ -16,6 +16,7 @@ from Instagram.models import InstagramProfile, Incoming as IGIncoming, Outgoing 
 from django.db.models.functions import ExtractWeekDay
 from django.db.models import Count
 from .serializers import *
+from django.apps import apps
 
 class MessageStatsAPIView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -470,3 +471,175 @@ class AnalyticsView(views.APIView):
         print("="*80 + "\n")
         
         return Response(response_data)
+
+# views.py
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
+from django.apps import apps
+from .serializers import ActivityLogSerializer
+
+class UserActivityLogView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        user = request.user
+        activities = []
+        
+        # Models to track
+        tracked_models = [
+            {'model': 'Service', 'app': 'Accounts'},
+            {'model': 'User', 'app': 'Accounts'},
+            {'model': 'CompanyInfo', 'app': 'Accounts'},
+            {'model': 'Company', 'app': 'Accounts'},
+        ]
+        
+        for tracked in tracked_models:
+            model = apps.get_model(tracked['app'], tracked['model'])
+            
+            # Get history for this user's records only
+            history_model = model.history.model
+            user_history = history_model.objects.filter(
+                history_user=user
+            ).order_by('-history_date')[:50]
+            
+            for record in user_history:
+                activity = {
+                    'id': record.history_id,
+                    'activity_type': self.get_activity_type(record),
+                    'title': self.get_activity_title(record),
+                    'description': self.get_activity_description(record),
+                    'icon': self.get_activity_icon(record),
+                    'timestamp': record.history_date,
+                    'model_name': tracked['model'],
+                    'changes': self.get_field_changes(record)  # NEW: Detailed changes
+                }
+                activities.append(activity)
+        
+        # Sort by timestamp (newest first)
+        activities.sort(key=lambda x: x['timestamp'], reverse=True)
+        
+        # Return last 20 activities
+        serializer = ActivityLogSerializer(activities[:20], many=True)
+        return Response(serializer.data)
+    
+    def get_activity_type(self, record):
+        type_map = {
+            '+': 'created',
+            '~': 'updated',
+            '-': 'deleted'
+        }
+        return type_map.get(record.history_type, 'unknown')
+    
+    def get_activity_title(self, record):
+        model_name = record._meta.model.__name__.replace('Historical', '')
+        
+        if record.history_type == '+':
+            return f"New {model_name} data added"
+        elif record.history_type == '~':
+            return f"{model_name} data updated"
+        elif record.history_type == '-':
+            return f"{model_name} data removed"
+    
+    def get_field_changes(self, record):
+        """Get detailed field-by-field changes"""
+        if record.history_type != '~':  # Only for updates
+            return []
+        
+        changes = []
+        prev = record.prev_record
+        
+        if not prev:
+            return []
+        
+        # Fields to ignore
+        ignored_fields = [
+            'id', 'history_id', 'history_date', 'history_change_reason',
+            'history_type', 'history_user', 'history_user_id','updated_at', 'created_at'
+        ]
+        
+        # Get all fields
+        for field in record._meta.fields:
+            field_name = field.name
+            
+            if field_name in ignored_fields:
+                continue
+            
+            try:
+                old_value = getattr(prev, field_name, None)
+                new_value = getattr(record, field_name, None)
+                
+                # Check if value changed
+                if old_value != new_value:
+                    changes.append({
+                        'field': self.format_field_name(field_name),
+                        'field_name': field_name,
+                        'old_value': self.format_value(old_value),
+                        'new_value': self.format_value(new_value),
+                    })
+            except Exception as e:
+                continue
+        
+        return changes
+    
+    def format_field_name(self, field_name):
+        """Convert field_name to readable format"""
+        # Convert snake_case to Title Case
+        return field_name.replace('_', ' ').title()
+    
+    def format_value(self, value):
+        """Format value for display"""
+        if value is None:
+            return 'None'
+        elif isinstance(value, bool):
+            return 'Yes' if value else 'No'
+        elif hasattr(value, 'strftime'):  # DateTime/Date/Time
+            return value.strftime('%Y-%m-%d %H:%M:%S')
+        else:
+            return str(value)
+    
+    def get_activity_description(self, record):
+        """Generate human-readable description"""
+        model_name = record._meta.model.__name__.replace('Historical', '')
+        
+        if record.history_type == '+':
+            # For creation
+            if hasattr(record, 'name'):
+                return f"'{record.name}' was created"
+            elif hasattr(record, 'question'):
+                return f"Question: '{record.question[:50]}...'"
+            return f"New {model_name} created"
+            
+        elif record.history_type == '~':
+            # For updates - show what changed
+            changes = self.get_field_changes(record)
+            
+            if changes:
+                # Create a summary of changes
+                if len(changes) == 1:
+                    change = changes[0]
+                    return f"{change['field']} changed from '{change['old_value']}' to '{change['new_value']}'"
+                else:
+                    field_names = [c['field'] for c in changes[:3]]
+                    if len(changes) > 3:
+                        return f"Updated {', '.join(field_names)} and {len(changes) - 3} more field(s)"
+                    return f"Updated {', '.join(field_names)}"
+            
+            return f"{model_name} was updated"
+            
+        elif record.history_type == '-':
+            # For deletion
+            if hasattr(record, 'name'):
+                return f"'{record.name}' was deleted"
+            return f"{model_name} was removed"
+    
+    def get_activity_icon(self, record):
+        icon_map = {
+            '+': 'info',
+            '~': 'edit',
+            '-': 'trash'
+        }
+        return icon_map.get(record.history_type, 'info')
+
+
+

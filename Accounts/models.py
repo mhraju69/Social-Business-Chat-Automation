@@ -3,6 +3,7 @@ from django.db import models
 from datetime import timedelta
 from django.conf import settings
 from django.utils import timezone
+from simple_history.models import HistoricalRecords
 from django.contrib.auth.models import BaseUserManager, AbstractBaseUser, PermissionsMixin
 
 class UserManager(BaseUserManager):
@@ -61,6 +62,8 @@ class User(AbstractBaseUser, PermissionsMixin):
             self.is_superuser = True
         super().save(*args, **kwargs)
 
+    history = HistoricalRecords()
+
 class Company(models.Model):
     user = models.ForeignKey(
         User, on_delete=models.CASCADE, related_name='company'
@@ -102,7 +105,9 @@ class Company(models.Model):
 
     def __str__(self):
         return self.name
-     
+    
+    history = HistoricalRecords()
+
 class OTP(models.Model):
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL, 
@@ -133,6 +138,8 @@ class Service(models.Model):
     def __str__(self):
         return self.name
 
+    history = HistoricalRecords()
+
 class CompanyInfo(models.Model):
     company = models.OneToOneField(Company, on_delete=models.CASCADE, related_name='info')
     name = models.TextField(blank=True, null=True)
@@ -142,3 +149,5 @@ class CompanyInfo(models.Model):
 
     def __str__(self):
         return f"Info for {self.company.name}"
+
+    history = HistoricalRecords()

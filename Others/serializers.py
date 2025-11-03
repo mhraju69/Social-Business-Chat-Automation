@@ -390,3 +390,19 @@ class AnalyticsSerializer(serializers.Serializer):
             weekly_data.append(day_data)
         
         return weekly_data
+    
+class FieldChangeSerializer(serializers.Serializer):
+    field = serializers.CharField()
+    field_name = serializers.CharField()
+    old_value = serializers.CharField()
+    new_value = serializers.CharField()
+
+class ActivityLogSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    activity_type = serializers.CharField()
+    title = serializers.CharField()
+    description = serializers.CharField()
+    icon = serializers.CharField()
+    timestamp = serializers.DateTimeField()
+    model_name = serializers.CharField()
+    # changes = FieldChangeSerializer(many=True)

@@ -7,4 +7,4 @@ from .models import Company
 def create_company_for_new_user(sender, instance, created, **kwargs):
     if created:
     # Automatically create a company for the new user
-        Company.objects.create(user=instance, name=f"{instance.username}'s Company")
+        Company.objects.create(user=instance, name=f"{instance.email}'s Company")

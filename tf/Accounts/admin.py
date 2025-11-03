@@ -1,9 +1,0 @@
-from unfold.admin import ModelAdmin
-from django.contrib import admin
-from .models import *
-# Register your models here.
-
-admin.site.register(User,ModelAdmin)
-admin.site.register(Company,ModelAdmin)
-admin.site.register(Service,ModelAdmin)
-

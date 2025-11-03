@@ -91,3 +91,4 @@ class CompanyInfoSerializer(serializers.ModelSerializer):
         user = self.context['request'].user
         validated_data['company'] = user.company.first()
         return super().create(validated_data)   
+    
