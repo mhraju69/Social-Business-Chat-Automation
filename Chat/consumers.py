@@ -9,7 +9,7 @@ from channels.layers import get_channel_layer
 from channels.db import database_sync_to_async
 from rest_framework_simplejwt.tokens import UntypedToken
 from django.contrib.auth import get_user_model
-from jwt import decode as jwt_decode
+import jwt
 from django.conf import settings
 User = get_user_model()
 
@@ -132,7 +132,7 @@ class AlertConsumer(AsyncWebsocketConsumer):
         try:
             # Validate token
             UntypedToken(token)
-            decoded_data = jwt_decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+            decoded_data = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
             user_id = decoded_data['user_id']
             return User.objects.get(id=user_id)
         except Exception:
