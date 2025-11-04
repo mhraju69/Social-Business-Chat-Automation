@@ -11,6 +11,7 @@ from rest_framework_simplejwt.tokens import UntypedToken
 from django.contrib.auth import get_user_model
 import jwt
 from django.conf import settings
+from openai import OpenAI
 User = get_user_model()
 
 class Consumer(AsyncWebsocketConsumer):
@@ -158,3 +159,62 @@ def send_alert(user, title, subtitle="", type="info"):
     )
     
     return alert
+
+client = OpenAI(
+    base_url="https://openrouter.ai/api/v1",
+    api_key=settings.AI_TOKEN,
+)
+
+def generate_ai_response(user_message):
+    """Generate AI response using OpenRouter (Gemini model)."""
+    try:
+        completion = client.chat.completions.create(
+            model="google/gemini-2.5-flash-lite-preview-09-2025",
+            messages=[
+                {"role": "system", "content": "You are a helpful WhatsApp assistant."},
+                {"role": "user", "content": user_message},
+            ],
+        )
+        return completion.choices[0].message.content or "Sorry, I couldn't generate a response."
+    except Exception as e:
+        print("⚠️ Error generating AI response:", e)
+        return "Sorry, something went wrong while generating a reply."
+
+class TestChatConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        self.room_group_name = "ai_chat"
+        await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+        await self.accept()
+        await self.send(text_data=json.dumps({"message": "Welcome to test chat with AI !"}))
+
+    async def disconnect(self, close_code): 
+        await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
+
+    async def receive(self, text_data):
+        try:
+            data = json.loads(text_data)
+            user_message = data.get("message")
+
+            if not user_message:
+                await self.send(text_data=json.dumps({"error": "No message received."}))
+                return
+
+            # Send typing event (optional)
+            await self.send(text_data=json.dumps({"status": "typing"}))
+
+            # Run AI in background
+            response = await self.get_ai_response(user_message)
+
+            await self.send(text_data=json.dumps({
+                "sender": "ai",
+                "message": response
+            }))
+
+        except Exception as e:
+            await self.send(text_data=json.dumps({"error": str(e)}))
+
+    async def get_ai_response(self, user_message):
+        from asgiref.sync import sync_to_async
+        response = await sync_to_async(generate_ai_response)(user_message)
+        return response
+    
