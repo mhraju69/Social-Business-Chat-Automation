@@ -22,5 +22,9 @@ urlpatterns = [
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
     path('analytics/', AnalyticsView.as_view(), name='analytics'),
     path('log/', UserActivityLogView.as_view(), name='user-activity-log'),
+    path('opening-hours/', OpeningHoursCreateView.as_view(), name='opening-hours-create'),
+    path('opening-hours/<int:id>/', OpeningHoursUpdateDeleteView.as_view(), name='opening-hours-update-delete'),
+    path('alerts/', UserAlertsView.as_view(), name='user-alerts'),
+    path('alerts/<int:alert_id>/read/', MarkAlertReadView.as_view(), name='mark-alert-read'),
 
 ]

@@ -6,6 +6,7 @@ from .models import *
 from django.conf import settings
 from openai import OpenAI
 from Chat.consumers import broadcast_message
+from Chat.consumers import send_alert
 
 # Initialize OpenAI client
 client = OpenAI(
@@ -111,7 +112,7 @@ def whatsapp_webhook(request):
 
                 # ✅ Store incoming message
                 Incoming.objects.create(receiver=profile, client=client_obj, text=msg_body)
-
+                send_alert(profile.user, title="New WhatsApp Message", subtitle=f"From: {from_number}", type='info')
                 # ✅ Broadcast message (mark as client sender)
                 broadcast_message(profile, client_obj, msg_body, "whatsapp", "client")
 

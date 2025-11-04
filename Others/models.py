@@ -197,3 +197,30 @@ class Payment(models.Model):
                 total_amount += payment.amount
         
         return qs
+    
+class OpeningHours(models.Model):
+    company = models.OneToOneField(Company, on_delete=models.CASCADE, related_name='opening_hours')
+    start = models.TimeField(verbose_name="Opening Time")
+    end = models.TimeField(verbose_name="Closing Time")
+
+    def __str__(self):
+        return f"Opening Hours for {self.company.name}"
+    
+class Alert(models.Model):
+    ALERT_TYPES = [
+        ("info", "Info"),
+        ("success", "Success"),
+        ("warning", "Warning"),
+        ("error", "Error"),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="alerts")
+    title = models.CharField(max_length=255)
+    subtitle = models.CharField(max_length=255, blank=True, null=True)
+    time = models.DateTimeField(auto_now_add=True)
+    type = models.CharField(max_length=20, choices=ALERT_TYPES, default="info")
+    is_read = models.BooleanField(default=False)
+
+    def __str__(self):
+        return f"{self.user.email} - {self.title}"
+    

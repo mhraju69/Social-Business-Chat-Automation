@@ -2,9 +2,16 @@ import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 from Whatsapp.models import WPRoom
 from Facebook.models import FBRoom
+from Others.models import Alert
+from Others.serializers import AlertSerializer
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
-
+from channels.db import database_sync_to_async
+from rest_framework_simplejwt.tokens import UntypedToken
+from django.contrib.auth import get_user_model
+from jwt import decode as jwt_decode
+from django.conf import settings
+User = get_user_model()
 
 class Consumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -67,8 +74,6 @@ class Consumer(AsyncWebsocketConsumer):
         }))
         print(f"📤 Sent to {self.platform} socket:", message)
 
-
-# 🟢 Broadcast Helper (used by webhooks)
 def broadcast_message(profile, client, message, platform,sender_type):
     """
     Broadcasts messages from Django views/webhooks to WebSocket clients
@@ -100,3 +105,56 @@ def broadcast_message(profile, client, message, platform,sender_type):
 
     except Exception as e:
         print(f"⚠️ Error broadcasting message ({platform}): {e}")
+
+class AlertConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        # Get JWT token from query params
+        self.token = self.scope['query_string'].decode().split("token=")[-1]
+        self.user = await self.get_user_from_token(self.token)
+
+        if self.user:
+            self.group_name = f"alerts_{self.user.id}"
+            await self.channel_layer.group_add(self.group_name, self.channel_name)
+            await self.accept()
+        else:
+            await self.close()
+
+    async def disconnect(self, close_code):
+        if hasattr(self, 'group_name'):
+            await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    # Receive alert from group
+    async def send_alert(self, event):
+        await self.send(text_data=json.dumps(event['alert']))
+
+    @database_sync_to_async
+    def get_user_from_token(self, token):
+        try:
+            # Validate token
+            UntypedToken(token)
+            decoded_data = jwt_decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+            user_id = decoded_data['user_id']
+            return User.objects.get(id=user_id)
+        except Exception:
+            return None
+
+def send_alert(user, title, subtitle="", type="info"):
+    # 1. Save to DB
+    alert = Alert.objects.create(
+        user=user,
+        title=title,
+        subtitle=subtitle,
+        type=type
+    )
+
+    # 2. Send real-time via WebSocket
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        f"alerts_{user.id}",  # same group name as in consumer
+        {
+            "type": "send_alert",  # must match method in consumer
+            "alert": AlertSerializer(alert).data
+        }
+    )
+    
+    return alert

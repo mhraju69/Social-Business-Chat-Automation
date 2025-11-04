@@ -17,6 +17,7 @@ from django.db.models.functions import ExtractWeekDay
 from django.db.models import Count
 from .serializers import *
 from django.apps import apps
+from rest_framework.exceptions import PermissionDenied
 
 class MessageStatsAPIView(views.APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -472,13 +473,6 @@ class AnalyticsView(views.APIView):
         
         return Response(response_data)
 
-# views.py
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from django.apps import apps
-from .serializers import ActivityLogSerializer
-
 class UserActivityLogView(APIView):
     permission_classes = [IsAuthenticated]
     
@@ -641,5 +635,48 @@ class UserActivityLogView(APIView):
         }
         return icon_map.get(record.history_type, 'info')
 
+class OpeningHoursCreateView(generics.CreateAPIView):
+    serializer_class = OpeningHoursSerializer
+    permission_classes = [permissions.IsAuthenticated]
 
+    def perform_create(self, serializer):
+        company = self.request.user.company.first()
+        if not company:
+            raise PermissionDenied("User does not have an associated company.")
+        if hasattr(company, 'opening_hours'):
+            raise PermissionDenied("This company already has opening hours set.")
+        serializer.save(company=company)
 
+class OpeningHoursUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = OpeningHours.objects.all()
+    serializer_class = OpeningHoursSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    lookup_field = 'id'
+
+    def get_object(self):
+        obj = super().get_object()
+        company = self.request.user.company.first()
+        if not company or obj.company != company:
+            raise PermissionDenied("You do not have permission to modify this record.")
+        return obj
+    
+class UserAlertsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user  # SimpleJWT automatically sets request.user
+        alerts = Alert.objects.filter(user=user)
+        serializer = AlertSerializer(alerts, many=True)
+        return Response(serializer.data)
+    
+class MarkAlertReadView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, alert_id):
+        try:
+            alert = Alert.objects.get(id=alert_id, user=request.user)
+            alert.is_read = True
+            alert.save()
+            return Response({"detail": "Alert marked as read"})
+        except Alert.DoesNotExist:
+            return Response({"detail": "Alert not found"}, status=status.HTTP_404_NOT_FOUND)

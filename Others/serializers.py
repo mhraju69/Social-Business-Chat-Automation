@@ -406,3 +406,14 @@ class ActivityLogSerializer(serializers.Serializer):
     timestamp = serializers.DateTimeField()
     model_name = serializers.CharField()
     # changes = FieldChangeSerializer(many=True)
+
+class OpeningHoursSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = OpeningHours
+        fields = ['id', 'start', 'end']
+    
+class AlertSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Alert
+        fields = ["id", "title", "subtitle", "time", "type", "is_read"]
+
