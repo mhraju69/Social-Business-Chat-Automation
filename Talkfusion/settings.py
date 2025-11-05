@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     'Chat',
     'Others',
     'simple_history',
+    'Socials'
 
 ]
 

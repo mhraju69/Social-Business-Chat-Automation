@@ -1,7 +1,5 @@
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
-from Whatsapp.models import WPRoom
-from Facebook.models import FBRoom
 from Others.models import Alert
 from Others.serializers import AlertSerializer
 from asgiref.sync import async_to_sync
@@ -12,100 +10,231 @@ from django.contrib.auth import get_user_model
 import jwt
 from django.conf import settings
 from openai import OpenAI
+from Socials.models import *
+from rest_framework_simplejwt.tokens import AccessToken
 User = get_user_model()
 
-class Consumer(AsyncWebsocketConsumer):
+class GlobalChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
-        # Extract platform and room_id from URL
-        self.platform = self.scope['url_route']['kwargs']['platform']  # 'whatsapp', 'facebook', 'instagram'
-        self.room_id = self.scope['url_route']['kwargs']['room_id']
-        self.room_group_name = f"{self.platform}_chat_{self.room_id}"
+        try:
+            # Token থেকে user verify করি
+            token = self.scope['query_string'].decode().split('token=')[-1]
+            self.user = await self.get_user_from_token(token)
+            
+            if not self.user:
+                await self.close()
+                return
 
-        # Join the group
-        await self.channel_layer.group_add(
-            self.room_group_name,
-            self.channel_name
-        )
-        await self.accept()
-        print(f"✅ WebSocket connected to {self.platform} room {self.room_id}")
+            # User এর সব profile এর জন্য group join করি
+            self.groups = []
+            profiles = await self.get_user_profiles(self.user)
+            
+            for profile in profiles:
+                group_name = f"chat_{profile.platform}_{profile.profile_id}"
+                self.groups.append(group_name)
+                await self.channel_layer.group_add(group_name, self.channel_name)
+
+            await self.accept()
+            
+            # Connection success message
+            await self.send(text_data=json.dumps({
+                'type': 'connection_established',
+                'message': 'Successfully connected to chat',
+                'user_id': self.user.id,
+                'profiles': [
+                    {
+                        'platform': p.platform,
+                        'profile_id': p.profile_id,
+                        'bot_active': p.bot_active
+                    } for p in profiles
+                ]
+            }))
+
+        except Exception as e:
+            print(f"❌ Connection Error: {e}")
+            await self.close()
 
     async def disconnect(self, close_code):
-        await self.channel_layer.group_discard(
-            self.room_group_name,
-            self.channel_name
-        )
-        print(f"❌ WebSocket disconnected from {self.platform} room {self.room_id}")
+        """WebSocket disconnect হলে"""
+        # সব group থেকে remove করি
+        for group_name in self.groups:
+            await self.channel_layer.group_discard(group_name, self.channel_name)
 
     async def receive(self, text_data):
-        """
-        When frontend sends a message (optional)
-        """
-        data = json.loads(text_data)
-        message = data.get('message', '')
-        sender_type = data.get('sender_type', 'client')
-        platform = data.get('from', self.platform)
+        """Client থেকে message receive করে"""
+        try:
+            data = json.loads(text_data)
+            action = data.get('action')
 
-        # Forward it to group (this triggers chat_message)
-        await self.channel_layer.group_send(
-            self.room_group_name,
-            {
-                'type': 'chat_message',  # must match async def chat_message
-                'message': message,
-                'sender_type': sender_type,
-                'platform': platform,  # consistent key name
-            }
-        )
+            # --- Action: Send Message ---
+            if action == 'send_message':
+                platform = data.get('platform')
+                client_id = data.get('client_id')
+                message_text = data.get('message')
 
+                if not all([platform, client_id, message_text]):
+                    await self.send(text_data=json.dumps({
+                        'type': 'error',
+                        'message': 'Missing required fields'
+                    }))
+                    return
+
+                # Message send করি
+                result = await self.send_outgoing_message(
+                    self.user, platform, client_id, message_text
+                )
+
+                if result.get('success'):
+                    await self.send(text_data=json.dumps({
+                        'type': 'message_sent',
+                        'message': 'Message sent successfully'
+                    }))
+                else:
+                    await self.send(text_data=json.dumps({
+                        'type': 'error',
+                        'message': result.get('error', 'Failed to send message')
+                    }))
+
+            # --- Action: Get Room List ---
+            elif action == 'get_rooms':
+                platform = data.get('platform')
+                rooms = await self.get_rooms_list(self.user, platform)
+                
+                await self.send(text_data=json.dumps({
+                    'type': 'rooms_list',
+                    'rooms': rooms
+                }))
+
+            # --- Action: Get Room Messages ---
+            elif action == 'get_messages':
+                platform = data.get('platform')
+                client_id = data.get('client_id')
+                limit = data.get('limit', 50)
+
+                messages = await self.get_room_messages(
+                    self.user, platform, client_id, limit
+                )
+
+                await self.send(text_data=json.dumps({
+                    'type': 'room_messages',
+                    'platform': platform,
+                    'client_id': client_id,
+                    'messages': messages
+                }))
+
+        except Exception as e:
+            print(f"❌ Receive Error: {e}")
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': str(e)
+            }))
+
+    # ----- Group Message Handler (Webhook থেকে broadcast) -----
     async def chat_message(self, event):
         """
-        Called whenever a message is sent to this group
+        Webhook থেকে broadcast message receive করে
+        Channel layer থেকে আসে
         """
-        # Prevent cross-platform broadcasting
-        if event.get('platform') != self.platform:
-            return
-
-        message = event.get('message', '')
-        sender_type = event.get('sender_type', 'client')
-        platform = event.get('platform', 'unknown')
-
         await self.send(text_data=json.dumps({
-            'message': message,
-            'sender_type': sender_type,
-            'platform': platform,
+            'type': 'new_message',
+            'platform': event['platform'],
+            'client_id': event['client_id'],
+            'message': event['message'],
+            'message_type': event['message_type'],  # incoming/outgoing
+            'timestamp': event['timestamp'],
+            'room_id': event.get('room_id')
         }))
-        print(f"📤 Sent to {self.platform} socket:", message)
 
-def broadcast_message(profile, client, message, platform,sender_type):
-    """
-    Broadcasts messages from Django views/webhooks to WebSocket clients
-    """
-    try:
-        if platform == 'whatsapp':
-            room_model = WPRoom
-        elif platform == 'facebook':
-            room_model = FBRoom
-        else:
-            print("⚠️ Unsupported platform:", platform)
-            return
+    # ----- Database Helper Methods -----
+    @database_sync_to_async
+    def get_user_from_token(self, token):
+        """Token থেকে user বের করে"""
+        try:
+            access_token = AccessToken(token)
+            user_id = access_token['user_id']
+            return User.objects.get(id=user_id)
+        except Exception as e:
+            print(f"❌ Token Error: {e}")
+            return None
 
-        room = room_model.objects.filter(user=profile, client=client).first()
-        if not room:
-            room = room_model.objects.create(user=profile, client=client)
+    @database_sync_to_async
+    def get_user_profiles(self, user):
+        """User এর সব active profiles"""
+        return list(ChatProfile.objects.filter(user=user, bot_active=True))
 
-        channel_layer = get_channel_layer()
-        group_name = f"{platform}_chat_{room.id}"
-        data = {
-            "type": "chat_message",   # must match consumer method
-            "message": message,
-            "sender_type": sender_type,
-            "platform": platform,     # consistent with consumer
-        }
+    @database_sync_to_async
+    def get_rooms_list(self, user, platform=None):
+        """User এর সব rooms with latest message"""
+        profiles = ChatProfile.objects.filter(user=user, bot_active=True)
+        if platform:
+            profiles = profiles.filter(platform=platform)
 
-        async_to_sync(channel_layer.group_send)(group_name, data)
-        print(f"🚀 Broadcasted to {group_name}: {message}")
+        rooms = []
+        for profile in profiles:
+            profile_rooms = ChatRoom.objects.filter(profile=profile).select_related('client')
+            
+            for room in profile_rooms:
+                last_msg = room.messages.order_by('-timestamp').first()
+                
+                rooms.append({
+                    'room_id': room.id,
+                    'platform': profile.platform,
+                    'profile_id': profile.profile_id,
+                    'client_id': room.client.client_id,
+                    'last_message': last_msg.text if last_msg else None,
+                    'last_message_time': last_msg.timestamp.isoformat() if last_msg else None,
+                    'last_message_type': last_msg.type if last_msg else None,
+                })
 
-    except Exception as e:
-        print(f"⚠️ Error broadcasting message ({platform}): {e}")
+        # Sort by latest message
+        rooms.sort(key=lambda x: x['last_message_time'] or '', reverse=True)
+        return rooms
+
+    @database_sync_to_async
+    def get_room_messages(self, user, platform, client_id, limit=50):
+        """Specific room এর messages"""
+        try:
+            profile = ChatProfile.objects.get(
+                user=user, platform=platform, bot_active=True
+            )
+            client = ChatClient.objects.get(platform=platform, client_id=client_id)
+            room = ChatRoom.objects.get(profile=profile, client=client)
+
+            messages = room.messages.order_by('-timestamp')[:limit]
+            messages = reversed(messages)  # Latest last
+
+            return [{
+                'id': msg.id,
+                'type': msg.type,
+                'text': msg.text,
+                'message_id': msg.message_id,
+                'timestamp': msg.timestamp.isoformat(),
+            } for msg in messages]
+
+        except Exception as e:
+            print(f"❌ Get Messages Error: {e}")
+            return []
+
+    @database_sync_to_async
+    def send_outgoing_message(self, user, platform, client_id, message_text):
+        """Frontend থেকে message পাঠানো (webhook এর send_message call করবে)"""
+        try:
+            from .views import send_message  # Your existing function
+            
+            profile = ChatProfile.objects.get(
+                user=user, platform=platform, bot_active=True
+            )
+            client, _ = ChatClient.objects.get_or_create(
+                platform=platform, client_id=client_id
+            )
+
+            # Existing send_message function use করি
+            result = send_message(profile, client, message_text)
+            
+            return {'success': True, 'result': result}
+        except Exception as e:
+            print(f"❌ Send Message Error: {e}")
+            return {'success': False, 'error': str(e)}
 
 class AlertConsumer(AsyncWebsocketConsumer):
     async def connect(self):
