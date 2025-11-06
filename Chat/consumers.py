@@ -2,7 +2,7 @@ import json
 from channels.generic.websocket import AsyncWebsocketConsumer
 from Others.models import Alert
 from Others.serializers import AlertSerializer
-from asgiref.sync import async_to_sync
+from asgiref.sync import async_to_sync, sync_to_async
 from channels.layers import get_channel_layer
 from channels.db import database_sync_to_async
 from rest_framework_simplejwt.tokens import UntypedToken
@@ -41,18 +41,35 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
                 'type': 'connection_established',
                 'message': 'Successfully connected to chat',
                 'user_id': self.user.id,
-                'profiles': [
-                    {
-                        'platform': p.platform,
-                        'profile_id': p.profile_id,
-                        'bot_active': p.bot_active
-                    } for p in profiles
-                ]
+                'profiles': await self.get_profiles_data(profiles)
+
+                        
             }))
 
         except Exception as e:
             print(f"❌ Connection Error: {e}")
             await self.close()
+
+    async def get_profiles_data(self,profiles):
+        profiles_data = []
+        # Evaluate the queryset safely
+        profiles_list = await sync_to_async(list)(profiles)
+
+        for p in profiles_list:
+            rooms = await sync_to_async(list)(p.rooms.select_related('client').all())
+            profile_info = {
+                'platform': p.platform,
+                'profile_id': p.profile_id,
+                'room': [
+                    {
+                        'client_id': room.client.client_id,
+                        'room_id': room.id
+                    } for room in rooms
+                ]
+            }
+            profiles_data.append(profile_info)
+
+        return profiles_data
 
     async def disconnect(self, close_code):
         """WebSocket disconnect হলে"""

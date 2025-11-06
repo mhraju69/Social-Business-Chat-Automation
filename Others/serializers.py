@@ -55,101 +55,79 @@ class PaymentSerializer(serializers.ModelSerializer):
             'payment_date',
         ]
 
+from rest_framework import serializers
+from django.utils import timezone
+from datetime import timedelta
+from Socials.models import ChatProfile, ChatClient, ChatRoom, ChatMessage
+
+
 class DashboardSerializer(serializers.Serializer):
-    meetings_today_count = serializers.SerializerMethodField()
-    meetings_today_list = serializers.SerializerMethodField()
-    upcoming_meetings_count = serializers.SerializerMethodField()
-    payments_today_total = serializers.SerializerMethodField()
-    payments_today_list = serializers.SerializerMethodField()
+    active_profiles = serializers.SerializerMethodField()
+    active_chats_count = serializers.SerializerMethodField()
+    today_messages_count = serializers.SerializerMethodField()
+    recent_messages = serializers.SerializerMethodField()
+    platform_breakdown = serializers.SerializerMethodField()
 
-    def _get_company(self):
-        """Get company associated with the user"""
+    def get_active_profiles(self, obj):
+        """Return list of connected profiles for this user"""
         user = self.context['request'].user
-        
-        # Handle different user-company relationship patterns
-        company_qs = getattr(user, 'company', None)
-        
-        if company_qs is None:
-            return None
-            
-        # If it's a RelatedManager or QuerySet
-        if hasattr(company_qs, 'first'):
-            company = company_qs.first()
-        else:
-            # If it's a direct foreign key
-            company = company_qs
-            
-        return company
+        profiles = ChatProfile.objects.filter(user=user, bot_active=True)
+        return [
+            {
+                "id": p.id,
+                "platform": p.platform,
+                "profile_id": p.profile_id,
+                "created_at": p.created_at,
+            }
+            for p in profiles
+        ]
 
-    def _get_timezone(self, company):
-        """Get timezone from query params or company settings"""
-        # First check query parameters
-        tz_param = self.context.get('timezone')
-        if tz_param:
-            return tz_param
-        
-        # Fall back to company timezone
-        tz_name = getattr(company, 'timezone', 'UTC') if company else 'UTC'
-        return tz_name
+    def get_active_chats_count(self, obj):
+        """Number of active chat rooms for this user"""
+        user = self.context['request'].user
+        rooms = ChatRoom.objects.filter(profile__user=user)
+        return rooms.count()
 
-    def get_meetings_today_count(self, obj):
-        company = self._get_company()
-        if not company:
-            return 0
+    def get_today_messages_count(self, obj):
+        """Count of messages received today across all platforms"""
+        user = self.context['request'].user
+        today = timezone.now().date()
+        return ChatMessage.objects.filter(
+            room__profile__user=user,
+            type='incoming',
+            timestamp__date=today
+        ).count()
 
-        tz_name = self._get_timezone(company)
-        qs = Booking.meetings_today(company=company, timezone_name=tz_name)
-        count = qs.count()
-        return count
+    def get_recent_messages(self, obj):
+        """Last 10 messages (incoming or outgoing)"""
+        user = self.context['request'].user
+        messages = ChatMessage.objects.filter(
+            room__profile__user=user
+        ).order_by('-timestamp')[:10]
 
-    def get_meetings_today_list(self, obj):
-        company = self._get_company()
-        if not company:
-            return []
-        
-        tz_name = self._get_timezone(company)
-        qs = Booking.meetings_today(company=company, timezone_name=tz_name).order_by('start_time')
-        count = qs.count()
+        return [
+            {
+                "platform": m.room.profile.platform,
+                "client_id": m.room.client.client_id,
+                "type": m.type,
+                "text": m.text,
+                "send_by_bot": m.send_by_bot,
+                "timestamp": m.timestamp,
+            }
+            for m in messages
+        ]
 
-        return BookingSerializer(qs, many=True).data
-
-    def get_upcoming_meetings_count(self, obj):
-        company = self._get_company()
-        if not company:
-            return 0
-
-        tz_name = self._get_timezone(company)
-        qs = Booking.new_meetings(company=company, timezone_name=tz_name)
-        count = qs.count()
-        return count
-    
-    def get_payments_today_list(self, obj):
-        company = self._get_company()
-        if not company:
-            return []
-        
-        tz_name = self._get_timezone(company)
-        qs = Payment.payments_today(company=company, timezone_name=tz_name).order_by('-payment_date')
-        count = qs.count()
-        
-        if count > 0:
-            for payment in qs:
-                print(f"  💵 {payment.reason}: ${payment.amount} - TXN: {payment.transaction_id}")
-        
-        return PaymentSerializer(qs, many=True).data
-
-    def get_payments_today_total(self, obj):
-        company = self._get_company()
-        if not company:
-            return 0
-        
-        tz_name = self._get_timezone(company)
-        qs = Payment.payments_today(company=company, timezone_name=tz_name)
-        
-        from django.db.models import Sum
-        total = qs.aggregate(total=Sum('amount'))['total'] or 0
-                
-        return float(total)
+    def get_platform_breakdown(self, obj):
+        """Breakdown of messages count by platform"""
+        user = self.context['request'].user
+        data = {}
+        for platform, _ in ChatProfile.PLATFORM_CHOICES:
+            count = ChatMessage.objects.filter(
+                room__profile__user=user,
+                room__profile__platform=platform
+            ).count()
+            data[platform] = count
+        return data
 
 class AnalyticsSerializer(serializers.Serializer):
     received_msg = serializers.SerializerMethodField()
