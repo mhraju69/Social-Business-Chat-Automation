@@ -4,6 +4,7 @@ from datetime import timedelta
 from django.conf import settings
 from django.utils import timezone
 from simple_history.models import HistoricalRecords
+from .permissions import PERMISSIONS_MATRIX, VALID_ROLES, PERMISSION_NAMES
 from django.contrib.auth.models import BaseUserManager, AbstractBaseUser, PermissionsMixin
 
 class UserManager(BaseUserManager):
@@ -29,12 +30,12 @@ class UserManager(BaseUserManager):
         return self.create_user(email, password, **extra_fields)
 
 class User(AbstractBaseUser, PermissionsMixin):
-    ROLE = (('user', 'User'),('admin', 'Admin'),)
+    ROLE = (('owner', 'Owner'),('admin', 'Admin'),('employee', 'Employee'),)
     name = models.CharField(max_length=200, blank=True, null=True,verbose_name="User Name")
     email = models.EmailField(max_length=255,unique=True,verbose_name="User Email")
     image = models.ImageField(upload_to='profile_images/', blank=True, null=True,) #storage=MediaCloudinaryStorage()
     phone = models.CharField(max_length=20, blank=True, null=True)
-    role = models.CharField(max_length=10, choices=ROLE, default='user',verbose_name="User Role")
+    role = models.CharField(max_length=10, choices=ROLE, default='owner',verbose_name="User Role")
     dob = models.DateField(blank=True, null=True,verbose_name="Date of Birs")
     is_active = models.BooleanField(default=False,verbose_name="Active User")
     is_staff = models.BooleanField(default=False,verbose_name="Staff User")  
@@ -65,9 +66,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     history = HistoricalRecords()
 
 class Company(models.Model):
-    user = models.ForeignKey(
-        User, on_delete=models.CASCADE, related_name='company'
-    )
+    owner = models.OneToOneField(User, related_name='company',on_delete=models.CASCADE)
     name = models.CharField(max_length=255)
     industry = models.CharField(max_length=100, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
@@ -104,7 +103,7 @@ class Company(models.Model):
     refresh_token = models.TextField(blank=True, null=True)  # For Google Calendar integration
 
     def __str__(self):
-        return self.name
+        return self.owner.email
     
     history = HistoricalRecords()
 
@@ -150,4 +149,69 @@ class CompanyInfo(models.Model):
     def __str__(self):
         return f"Info for {self.company.name}"
 
+    history = HistoricalRecords()
+
+class Employee(models.Model):
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='employee')
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='employees')
+    roles = models.JSONField(default=list)  # Store roles as JSON list
+    
+    def __str__(self):
+        return f"{self.user.email} - {self.company.name} - {self.roles}"
+    
+    def has_permission(self, permission_type):
+        """Check if employee has specific permission based on their roles"""
+        for role in self.roles:
+            if role in PERMISSIONS_MATRIX and PERMISSIONS_MATRIX[role].get(permission_type, False):
+                return True
+        return False
+    
+    def get_all_permissions(self):
+        """Get all permissions for this employee (union of all role permissions)"""
+        permissions = {}
+        for role in self.roles:
+            if role in PERMISSIONS_MATRIX:
+                for perm, has_access in PERMISSIONS_MATRIX[role].items():
+                    if has_access:
+                        permissions[perm] = True
+        return list(permissions.keys())
+    
+    def get_permissions_with_details(self):
+        """Get permissions with details"""
+        permissions = {}
+        for role in self.roles:
+            if role in PERMISSIONS_MATRIX:
+                for perm, has_access in PERMISSIONS_MATRIX[role].items():
+                    if has_access and perm not in permissions:
+                        permissions[perm] = {
+                            'name': PERMISSION_NAMES.get(perm, perm),
+                            'granted_by': role
+                        }
+        return permissions
+    
+    # Convenience methods for common permissions
+    def can_view_dashboard(self):
+        return self.has_permission('view_dashboard')
+    
+    def can_manage_users(self):
+        return self.has_permission('manage_users')
+    
+    def can_access_financial_data(self):
+        return self.has_permission('financial_data')
+    
+    def can_access_customer_support(self):
+        return self.has_permission('customer_support')
+    
+    def can_access_billing_invoices(self):
+        return self.has_permission('billing_invoices')
+    
+    def can_access_analytics_reports(self):
+        return self.has_permission('analytics_reports')
+    
+    def can_access_system_settings(self):
+        return self.has_permission('system_settings')
+    
+    def can_manage_api(self):
+        return self.has_permission('api_management')
+    
     history = HistoricalRecords()

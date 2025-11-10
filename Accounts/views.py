@@ -8,9 +8,12 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 import requests
+from .permissions import VALID_ROLES
 from django.core.files.base import ContentFile
 from django.contrib.auth.hashers import make_password
 from django.utils.text import slugify
+import random
+import string
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -216,7 +219,7 @@ class CompanyDetailUpdateView(generics.RetrieveUpdateAPIView):
         If the user has multiple companies, take the first one.
         """
         # Use .first() to get a single instance from RelatedManager
-        company = self.request.user.company.first()
+        company = self.request.user.company
         if not company:
             # Optional: raise 404 if user has no company
             from rest_framework.exceptions import NotFound
@@ -228,7 +231,7 @@ class ServiceListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Service.objects.filter(company=self.request.user.company.first())
+        return Service.objects.filter(company=self.request.user.company)
 
     def perform_create(self, serializer):
         serializer.save(company=self.request.user.company)
@@ -239,7 +242,7 @@ class ServiceRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_queryset(self):
         # Only allow access to services belonging to the user’s company
-        return Service.objects.filter(company=self.request.user.company.first())
+        return Service.objects.filter(company=self.request.user.company)
 
 class CompanyInfoCreateView(generics.ListCreateAPIView):
     serializer_class = CompanyInfoSerializer
@@ -263,3 +266,100 @@ class CompanyInfoRetrieveUpdateView(generics.RetrieveUpdateDestroyAPIView):
             from rest_framework.exceptions import NotFound
             raise NotFound("No company info found for this company.")
     
+class AddEmployeeView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def post(self, request):
+        email = request.data.get('email')
+        roles = request.data.get('roles', [])  
+        
+        if not email:
+            return Response({'error': 'Email is required.'}, status=400)
+        
+        # Validate roles
+        if not isinstance(roles, list):
+            return Response({'error': 'Roles must be a list.'}, status=400)
+        
+        invalid_roles = [role for role in roles if role not in VALID_ROLES]
+        if invalid_roles:
+            return Response({
+                'error': f'Invalid roles: {", ".join(invalid_roles)}. Valid roles are: {", ".join(VALID_ROLES)}'
+            }, status=400)
+        
+        if not roles:
+            return Response({'error': 'At least one role is required.'}, status=400)
+        
+        owner = request.user.email
+        try:
+            company = Company.objects.get(owner__email=owner)
+        except Company.DoesNotExist:
+            return Response({'error': 'Company not found.'}, status=404)
+        
+        if User.objects.filter(email=email).exists():
+            return Response({'error': 'User with this email already exists.'}, status=400)
+        
+        # Create user
+        password = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(8))
+        user = User.objects.create_user(
+            email=email, 
+            password=password,
+            is_active=True,
+            role='employee'
+        )
+        
+        # Create employee with roles
+        employee = Employee.objects.create(user=user, company=company, roles=roles)
+        
+        # Send invitation (assuming this function exists)
+        send_employee_invitation(email, password, company.name,roles)
+        
+        return Response({
+            'success': f'Employee added with email {email}',
+            'password': password,  # Consider removing this in production
+            'roles': roles,
+            'permissions': employee.get_all_permissions(),
+            'permissions_details': employee.get_permissions_with_details()
+        }, status=201)
+    
+class GetPermissionsView(APIView):
+    """Get permissions for the authenticated user"""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        employee = Employee.objects.filter(user=user).first()
+
+        if not employee:
+            return Response({"detail": "Employee record not found."}, status=404)
+
+        # roles is a JSONField (list of strings)
+        user_roles = getattr(employee, 'roles', [])
+        if not isinstance(user_roles, list):
+            user_roles = [user_roles]
+
+        if not user_roles:
+            return Response({"detail": "User has no assigned roles."}, status=404)
+
+        combined_permissions = {}
+
+        # Merge permissions for all roles
+        for role in user_roles:
+            role_perms = PERMISSIONS_MATRIX.get(role, {})
+            for perm, has_access in role_perms.items():
+                # If any role grants access, mark it as True
+                if perm not in combined_permissions:
+                    combined_permissions[perm] = has_access
+                else:
+                    combined_permissions[perm] = combined_permissions[perm] or has_access
+
+        # Map internal names to readable ones
+        formatted_permissions = {
+            PERMISSION_NAMES.get(perm, perm): access
+            for perm, access in combined_permissions.items()
+        }
+
+        return Response({
+            "user": getattr(user, 'email', str(user)),
+            "roles": user_roles,
+            "permissions": formatted_permissions
+        })

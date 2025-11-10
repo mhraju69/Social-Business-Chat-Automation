@@ -127,7 +127,7 @@ class GoogleAccount(models.Model):
     scopes = models.JSONField(default=list)
 
     def __str__(self):
-        return f"{self.user.username} - Google Connected"
+        return f"{self.user.email} - Google Connected"
     
 class ChatBot(models.Model):
     user = models.OneToOneField(

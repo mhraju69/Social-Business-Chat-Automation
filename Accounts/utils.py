@@ -1,8 +1,6 @@
 import logging
 from .models import *
-from datetime import timedelta
 from django.conf import settings
-from django.utils import timezone
 logger = logging.getLogger(__name__)
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
@@ -67,7 +65,6 @@ def send_otp(email, task=None):
 
     return {"success": True, "message": f"OTP sent successfully for {task or 'Verification'}."}
 
-
 def verify_otp(email, otp_code):
     try:
         otp_obj = OTP.objects.filter(user__email=email).latest('created_at')
@@ -88,4 +85,45 @@ def verify_otp(email, otp_code):
     otp_obj.delete()
 
     return {"success": True, "message": "OTP verified successfully."}
+
+def send_employee_invitation(email, password, company_name,roles):
+        subject = f"Welcome to {company_name} - Your Talk Fusion Employee Account"
+        
+        # Render HTML template
+        html_content = render_to_string("email/employee_invitation.html", {
+            "email": email,
+            "password": password,
+            "company_name": company_name,
+            "roles": roles,
+            "login_url": "https://yourdomain.com/login"  # Replace with actual login URL
+        })
+
+        # Plain text fallback
+        text_content = f"""
+        Welcome to Talk Fusion!
+
+        You've been invited to join {company_name} as an employee.
+
+        Your login credentials:
+        Email: {email}
+        Temporary Password: {password}
+
+        Login URL: https://yourdomain.com/login
+
+        Important:
+        - Change your password after first login
+        - Never share your credentials
+        - Contact support if you need help
+
+        © 2024 Talk Fusion. All rights reserved.
+        """
+
+        msg = EmailMultiAlternatives(
+            subject, 
+            text_content, 
+            settings.DEFAULT_FROM_EMAIL, 
+            [email]
+        )
+        msg.attach_alternative(html_content, "text/html")
+        msg.send()
 

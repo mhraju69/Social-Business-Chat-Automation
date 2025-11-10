@@ -5,6 +5,9 @@ from .models import Company
 
 @receiver(post_save, sender=settings.AUTH_USER_MODEL)
 def create_company_for_new_user(sender, instance, created, **kwargs):
-    if created:
-    # Automatically create a company for the new user
-        Company.objects.create(user=instance, name=f"{instance.email}'s Company")
+    if not created:
+        return  
+
+    # Check user role
+    if instance.role == "owner": 
+        Company.objects.create(owner=instance)
