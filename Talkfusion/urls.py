@@ -1,7 +1,6 @@
 from django.contrib import admin
 from django.urls import path
 from Socials.webhook import *
-from Instagram.views import *
 from Socials.views import *
 from Others.views import *
 from django.urls import path, include

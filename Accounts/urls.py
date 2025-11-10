@@ -2,11 +2,6 @@ from django.urls import path,include
 from .views import *
 from rest_framework.routers import DefaultRouter
 from Accounts.views import *
-from Whatsapp.whatsapp import *
-from Facebook.facebook import *
-from Instagram.instagram import *
-from Instagram.views import *
-from Facebook.views import *
 from Others.views import *
 
 
