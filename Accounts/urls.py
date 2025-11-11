@@ -18,6 +18,8 @@ urlpatterns = [
     path('company/service/<int:pk>/', ServiceRetrieveUpdateDestroyView.as_view(), name='service-detail'),
     path('company/info/', CompanyInfoCreateView.as_view(), name='companyinfo-create'),
     path('company/info/<int:pk>/', CompanyInfoRetrieveUpdateView.as_view(), name='companyinfo-retrieve-update'),
-    path('company/employee/add/', AddEmployeeView.as_view(), name='add-employee'),
+    path('company/employee/', AddEmployeeView.as_view(), name='add-employee'),
     path('company/employee/check-permissions/', GetPermissionsView.as_view(), name='employee-list'),
+    path('company/employee/update-permissions/', UpdatePermissionsView.as_view(), name='employee-list'),
+
 ]

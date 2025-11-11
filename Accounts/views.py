@@ -8,7 +8,7 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
 import requests
-from .permissions import VALID_ROLES
+from .permissions import *
 from django.core.files.base import ContentFile
 from django.contrib.auth.hashers import make_password
 from django.utils.text import slugify
@@ -267,7 +267,26 @@ class CompanyInfoRetrieveUpdateView(generics.RetrieveUpdateDestroyAPIView):
             raise NotFound("No company info found for this company.")
     
 class AddEmployeeView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated,IsOwner]
+
+    def get(self, request):
+        owner = request.user.email
+        try:
+            company = Company.objects.get(owner__email=owner)
+        except Company.DoesNotExist:
+            return Response({'error': 'Company not found.'}, status=404)
+        
+        employees = Employee.objects.filter(company=company)
+        employee_data = []
+        for emp in employees:
+            employee_data.append({
+                'email': emp.user.email,
+                'roles': emp.roles,
+                'permissions': emp.get_all_permissions(),
+                'permissions_details': emp.get_permissions_with_details()
+            })
+        
+        return Response({'employees': employee_data}, status=200)
     
     def post(self, request):
         email = request.data.get('email')
@@ -323,7 +342,7 @@ class AddEmployeeView(APIView):
     
 class GetPermissionsView(APIView):
     """Get permissions for the authenticated user"""
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated,IsOwner]
 
     def get(self, request):
         user = request.user
@@ -363,3 +382,48 @@ class GetPermissionsView(APIView):
             "roles": user_roles,
             "permissions": formatted_permissions
         })
+
+class UpdatePermissionsView(APIView):
+    """Update roles (permissions) for an employee - Admin only"""
+    permission_classes = [permissions.IsAuthenticated,IsOwner]
+
+    def post(self, request):
+        # Extract target employee email and new roles
+        email = request.data.get("email")
+        new_roles = request.data.get("roles")
+
+        if not email or not new_roles:
+            return Response(
+                {"detail": "Both 'email' and 'roles' are required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not isinstance(new_roles, list):
+            return Response(
+                {"detail": "'roles' must be a list of role names."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Get the requesting user (from token)
+        current_user = request.user
+
+        # Find the target employee
+        target_employee = Employee.objects.filter(user__email=email).first()
+        if not target_employee:
+            return Response(
+                {"detail": f"No employee found with email {email}."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        # Update roles (assuming roles is a JSONField)
+        target_employee.roles = new_roles
+        target_employee.save()
+
+        return Response(
+            {
+                "detail": f"Roles updated successfully for {email}.",
+                "roles": target_employee.roles
+            },
+            status=status.HTTP_200_OK
+        )
+

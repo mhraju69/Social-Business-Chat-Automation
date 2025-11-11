@@ -1,4 +1,5 @@
 # permissions_config.py
+from rest_framework import permissions
 
 PERMISSIONS_MATRIX = {
     'owner': {
@@ -67,3 +68,24 @@ PERMISSION_NAMES = {
     'system_settings': 'System Settings',
     'api_management': 'API Management',
 }
+
+class IsOwner(permissions.BasePermission):
+    """Allow access only to owners."""
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated and request.user.is_owner)
+
+
+class IsEmployee(permissions.BasePermission):
+    """Allow access only to employees."""
+    def has_permission(self, request, view):
+        return bool(request.user and request.user.is_authenticated and request.user.is_employee)
+
+
+class IsOwnerOrEmploye(permissions.BasePermission):
+    """Allow access to admins or owners."""
+    def has_permission(self, request, view):
+        return bool(
+            request.user
+            and request.user.is_authenticated
+            and (request.user.is_employee or request.user.is_owner)
+        )

@@ -23,7 +23,7 @@ services:
     image: nginx:latest
     container_name: talkfusion_nginx
     ports:
-      - "8080:80"
+      - "8000:80"
     volumes:
       - ./default.conf:/etc/nginx/conf.d/default.conf
       - ./staticfiles:/static
