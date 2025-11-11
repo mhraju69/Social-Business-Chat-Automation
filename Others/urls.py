@@ -11,8 +11,6 @@ urlpatterns = [
     path('booking/<int:booking_id>/', BookingAPIView.as_view()),  
     path("google/booking/", SocialAuthCallbackView.as_view()),
     path("boking/today/<int:company_id>", SocialAuthCallbackView.as_view()),
-    path('stripe/', StripeListCreateView.as_view(), name='stripe-list-create'),
-    path('stripe/update/', StripeUpdateView.as_view(), name='stripe-list-create'),
     path('dashboard/', DashboardView.as_view(), name='dashboard'),
     path('analytics/', AnalyticsView.as_view(), name='analytics'),
     path('log/', UserActivityLogView.as_view(), name='user-activity-log'),

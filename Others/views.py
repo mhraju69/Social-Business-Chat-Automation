@@ -286,40 +286,6 @@ class BookingAPIView(APIView):
         booking.delete()
         return Response({"message": "Booking deleted"}, status=status.HTTP_200_OK)
 
-class StripeListCreateView(generics.ListCreateAPIView):
-    permission_classes = [permissions.IsAuthenticated]
-    serializer_class = StripeSerializer
-
-    def get_queryset(self):
-        user = self.request.user
-        company = getattr(user, 'company', None)
-        if hasattr(company, 'first'):
-            company = company.first()  # get actual Company instance
-        return Stripe.objects.filter(company=company)
-
-class StripeUpdateView(generics.UpdateAPIView):
-    permission_classes = [permissions.IsAuthenticated]
-    serializer_class = StripeSerializer
-
-    def get_object(self):
-        user = self.request.user
-        company_qs = getattr(user, 'company', None)
-
-        if hasattr(company_qs, 'first'):
-            company = company_qs.first()
-        else:
-            company = company_qs
-
-        if not company:
-            raise serializers.ValidationError("User has no associated company.")
-
-        try:
-            stripe_obj = company.stripe  # OneToOneField reverse
-        except ObjectDoesNotExist:
-            raise serializers.ValidationError("Stripe object does not exist for this company.")
-
-        return stripe_obj
-    
 class DashboardView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 

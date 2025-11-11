@@ -20,6 +20,7 @@ class ChatProfile(models.Model):
     profile_id = models.CharField(max_length=150, unique=True)   # e.g. number_id, page_id, instagram_id
     access_token = EncryptedCharField(max_length=5000)
     bot_active = models.BooleanField(default=True)
+    is_approved = models.BooleanField(default=False)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

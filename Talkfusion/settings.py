@@ -54,8 +54,8 @@ INSTALLED_APPS = [
     'Chat',
     'Others',
     'simple_history',
-    'Socials'
-
+    'Socials',
+    'Finance',
 ]
 
 MIDDLEWARE = [
