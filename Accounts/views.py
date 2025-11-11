@@ -267,12 +267,12 @@ class CompanyInfoRetrieveUpdateView(generics.RetrieveUpdateDestroyAPIView):
             raise NotFound("No company info found for this company.")
     
 class AddEmployeeView(APIView):
-    permission_classes = [permissions.IsAuthenticated,IsOwner]
+    permission_classes = [permissions.IsAuthenticated,Isuser]
 
     def get(self, request):
-        owner = request.user.email
+        user = request.user.email
         try:
-            company = Company.objects.get(owner__email=owner)
+            company = Company.objects.get(user__email=user)
         except Company.DoesNotExist:
             return Response({'error': 'Company not found.'}, status=404)
         
@@ -308,9 +308,9 @@ class AddEmployeeView(APIView):
         if not roles:
             return Response({'error': 'At least one role is required.'}, status=400)
         
-        owner = request.user.email
+        user = request.user.email
         try:
-            company = Company.objects.get(owner__email=owner)
+            company = Company.objects.get(user__email=user)
         except Company.DoesNotExist:
             return Response({'error': 'Company not found.'}, status=404)
         
@@ -342,7 +342,7 @@ class AddEmployeeView(APIView):
     
 class GetPermissionsView(APIView):
     """Get permissions for the authenticated user"""
-    permission_classes = [permissions.IsAuthenticated,IsOwner]
+    permission_classes = [permissions.IsAuthenticated,Isuser]
 
     def get(self, request):
         user = request.user
@@ -385,7 +385,7 @@ class GetPermissionsView(APIView):
 
 class UpdatePermissionsView(APIView):
     """Update roles (permissions) for an employee - Admin only"""
-    permission_classes = [permissions.IsAuthenticated,IsOwner]
+    permission_classes = [permissions.IsAuthenticated,Isuser]
 
     def post(self, request):
         # Extract target employee email and new roles

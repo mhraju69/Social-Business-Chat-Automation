@@ -9,5 +9,5 @@ def create_company_for_new_user(sender, instance, created, **kwargs):
         return  
 
     # Check user role
-    if instance.role == "owner": 
-        Company.objects.create(owner=instance)
+    if instance.role == "user": 
+        Company.objects.create(user=instance)

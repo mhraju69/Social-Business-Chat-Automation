@@ -30,12 +30,12 @@ class UserManager(BaseUserManager):
         return self.create_user(email, password, **extra_fields)
 
 class User(AbstractBaseUser, PermissionsMixin):
-    ROLE = (('owner', 'Owner'),('admin', 'Admin'),('employee', 'Employee'),)
+    ROLE = (('user', 'User'),('admin', 'Admin'),('employee', 'Employee'),)
     name = models.CharField(max_length=200, blank=True, null=True,verbose_name="User Name")
     email = models.EmailField(max_length=255,unique=True,verbose_name="User Email")
     image = models.ImageField(upload_to='profile_images/', blank=True, null=True,) #storage=MediaCloudinaryStorage()
     phone = models.CharField(max_length=20, blank=True, null=True)
-    role = models.CharField(max_length=10, choices=ROLE, default='owner',verbose_name="User Role")
+    role = models.CharField(max_length=10, choices=ROLE, default='user',verbose_name="User Role")
     dob = models.DateField(blank=True, null=True,verbose_name="Date of Birs")
     is_active = models.BooleanField(default=False,verbose_name="Active User")
     is_staff = models.BooleanField(default=False,verbose_name="Staff User")  
@@ -65,7 +65,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     
     @property
     def is_owner(self):
-        return self.role == 'owner'
+        return self.role == 'user'
 
     @property
     def is_employee(self):
@@ -74,7 +74,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     history = HistoricalRecords()
 
 class Company(models.Model):
-    owner = models.OneToOneField(User, related_name='company',on_delete=models.CASCADE)
+    user = models.OneToOneField(User, related_name='company',on_delete=models.CASCADE)
     name = models.CharField(max_length=255)
     industry = models.CharField(max_length=100, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
@@ -111,7 +111,7 @@ class Company(models.Model):
     refresh_token = models.TextField(blank=True, null=True)  # For Google Calendar integration
 
     def __str__(self):
-        return self.owner.email
+        return self.user.email
     
     history = HistoricalRecords()
 
