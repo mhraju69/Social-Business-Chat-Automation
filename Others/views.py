@@ -289,18 +289,27 @@ class BookingAPIView(APIView):
 class DashboardView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
+    def get_open_chats_count(self, user, minutes=10):
+        user_profiles = ChatProfile.objects.filter(user=user)
+        rooms = ChatRoom.objects.filter(profile__in=user_profiles)
+
+        now = timezone.now()
+        threshold_time = now - timedelta(minutes=minutes)
+
+        open_chat_count = 0
+        for room in rooms:
+            last_message = room.messages.order_by('-timestamp').first()
+            if last_message and last_message.timestamp >= threshold_time:
+                open_chat_count += 1
+
+        return open_chat_count
+
     def get(self, request, *args, **kwargs):
-        timezone_param = request.query_params.get('timezone', None)
-        serializer = DashboardSerializer(
-            instance={},  # Pass a dummy instance
-            context={
-                'request': request,
-                'timezone': timezone_param
-            }
-        )
+        open_chat_count = self.get_open_chats_count(request.user, minutes=10)
+        return Response({
+            "open_chat": open_chat_count
+        })
         
-        response_data = serializer.data
-        return Response(response_data)
     
 class AnalyticsView(APIView):
     permission_classes = [permissions.IsAuthenticated]

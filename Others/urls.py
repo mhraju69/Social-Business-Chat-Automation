@@ -7,7 +7,8 @@ urlpatterns = [
     path('get-otp/', GetOtp.as_view()),
     path('login/', LoginView.as_view(), name='login'),
     path('verify-otp/',VerifyOTP.as_view(), name="verify_otp"),
-    path('booking/', BookingAPIView.as_view()),  # POST to create
+    path('booking/', BookingAPIView.as_view()),
+    path('dashboard/', DashboardView.as_view()),
     path('booking/<int:booking_id>/', BookingAPIView.as_view()),  
     path("google/booking/", SocialAuthCallbackView.as_view()),
     path("boking/today/<int:company_id>", SocialAuthCallbackView.as_view()),
