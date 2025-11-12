@@ -41,8 +41,8 @@ CSRF_TRUSTED_ORIGINS = [
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",  
 ]
-#DEBUG = True
-DEBUG = False
+DEBUG = True
+#DEBUG = False
 # Application definition
 
 INSTALLED_APPS = [

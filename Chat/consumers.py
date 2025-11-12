@@ -7,7 +7,6 @@ from channels.layers import get_channel_layer
 from channels.db import database_sync_to_async
 from rest_framework_simplejwt.tokens import UntypedToken
 from django.contrib.auth import get_user_model
-import jwt
 from django.conf import settings
 from openai import OpenAI
 from Socials.models import *
@@ -276,13 +275,13 @@ class AlertConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def get_user_from_token(self, token):
+        """Token থেকে user বের করে"""
         try:
-            # Validate token
-            UntypedToken(token)
-            decoded_data = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-            user_id = decoded_data['user_id']
+            access_token = AccessToken(token)
+            user_id = access_token['user_id']
             return User.objects.get(id=user_id)
-        except Exception:
+        except Exception as e:
+            print(f"❌ Token Error: {e}")
             return None
 
 def send_alert(user, title, subtitle="", type="info"):

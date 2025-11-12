@@ -11,6 +11,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction
 from django.utils import timezone
 import stripe
+from Chat.consumers import send_alert
 from decimal import Decimal
 from django.http import Http404
 # Create your views here.
@@ -142,7 +143,6 @@ def create_checkout_session(request, company_id, plan_id=None):
 def payment_success(request):
     return HttpResponse("✅ Payment successful!")
 
-
 def payment_cancel(request):
     return HttpResponse("❌ Payment cancelled.")
 
@@ -219,8 +219,15 @@ def stripe_webhook(request):
                 transaction_id=data['id'],
                 payment_date=timezone.now()
             )
+            admins = User.objects.filter(is_staff=True) 
+            for admin in admins:
+                send_alert(
+                    admin,
+                    "New payment received",
+                    f"{amount} USD received for {plan.get_name_display()} ({plan.get_duration_display()}) subscription plan from {getattr(company.user, 'name', None) or company.user.email}",
+                    "info"
+                )
 
-            print(f"✅ Subscription activated for {company.name}, amount: {amount}")
 
         elif meta_type == 'payment':
             Payment.objects.create(
@@ -230,6 +237,7 @@ def stripe_webhook(request):
                 transaction_id=data['id'],
                 payment_date=timezone.now()
             )
+            send_alert(company.user,"New payment recieved" , f"{amount}USD recieved for {metadata.get('reason', 'Payment')}","info")
             print(f"✅ One-time payment recorded for {company.name}, amount: {amount}")
 
         else:
