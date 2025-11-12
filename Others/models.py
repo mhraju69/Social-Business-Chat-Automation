@@ -122,12 +122,26 @@ class ChatBot(models.Model):
         return f"{self.name} - {self.user.email}"
        
 class OpeningHours(models.Model):
-    company = models.OneToOneField(Company, on_delete=models.CASCADE, related_name='opening_hours')
+    DAYS_OF_WEEK = [
+        ('mon', 'Monday'),
+        ('tue', 'Tuesday'),
+        ('wed', 'Wednesday'),
+        ('thu', 'Thursday'),
+        ('fri', 'Friday'),
+        ('sat', 'Saturday'),
+        ('sun', 'Sunday'),
+    ]
+
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='opening_hours')
+    day = models.CharField(max_length=3, choices=DAYS_OF_WEEK)
     start = models.TimeField(verbose_name="Opening Time")
     end = models.TimeField(verbose_name="Closing Time")
 
+    class Meta:
+        unique_together = ('company', 'day','start')
+
     def __str__(self):
-        return f"Opening Hours for {self.company.name}"
+        return f"{self.company.name} - {self.get_day_display()}: {self.start} - {self.end}"
     
 class Alert(models.Model):
     ALERT_TYPES = [

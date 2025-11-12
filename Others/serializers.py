@@ -338,8 +338,8 @@ class ActivityLogSerializer(serializers.Serializer):
 class OpeningHoursSerializer(serializers.ModelSerializer):
     class Meta:
         model = OpeningHours
-        fields = ['id', 'start', 'end']
-    
+        fields = ['id','company', 'day', 'start', 'end']
+
 class AlertSerializer(serializers.ModelSerializer):
     class Meta:
         model = Alert

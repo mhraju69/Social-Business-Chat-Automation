@@ -5,3 +5,4 @@ from unfold.admin import ModelAdmin
 
 admin.site.register(Booking,ModelAdmin)
 admin.site.register(ChatBot,ModelAdmin)
+admin.site.register(OpeningHours,ModelAdmin)

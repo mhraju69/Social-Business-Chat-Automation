@@ -611,17 +611,35 @@ class UserActivityLogView(APIView):
         }
         return icon_map.get(record.history_type, 'info')
 
-class OpeningHoursCreateView(generics.CreateAPIView):
-    serializer_class = OpeningHoursSerializer
+class OpeningHoursCreateView(APIView):
     permission_classes = [permissions.IsAuthenticated]
+    def post(self, request):
+        company = Company.objects.filter(user = request.user).first()
+        company_id = company.id
+        days = request.data.get('days')  # e.g. ["mon", "wed", "fri"]
+        start = request.data.get('start')
+        end = request.data.get('end')
 
-    def perform_create(self, serializer):
-        company = self.request.user.company.first()
+        if not all([company_id, days, start, end]):
+            return Response({"error": "company, days, start, end are required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        objects = []
+        for day in days:
+            objects.append(OpeningHours(company_id=company_id, day=day, start=start, end=end))
+
+        OpeningHours.objects.bulk_create(objects)  # create all at once
+
+        serializer = OpeningHoursSerializer(objects, many=True)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    def get(self, request):
+        company = Company.objects.filter(user=request.user).first()
         if not company:
-            raise PermissionDenied("User does not have an associated company.")
-        if hasattr(company, 'opening_hours'):
-            raise PermissionDenied("This company already has opening hours set.")
-        serializer.save(company=company)
+            return Response({"detail": "You do not have an associated company."}, status=status.HTTP_403_FORBIDDEN)
+
+        obj = OpeningHours.objects.filter(company=company)
+        serializer = OpeningHoursSerializer(obj, many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 class OpeningHoursUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
     queryset = OpeningHours.objects.all()
@@ -631,9 +649,15 @@ class OpeningHoursUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_object(self):
         obj = super().get_object()
-        company = self.request.user.company.first()
-        if not company or obj.company != company:
+
+        company = Company.objects.filter(user=self.request.user).first()
+
+        if not company:
+            raise PermissionDenied("You do not have an associated company.")
+
+        if obj.company != company:
             raise PermissionDenied("You do not have permission to modify this record.")
+
         return obj
     
 class UserAlertsView(APIView):
