@@ -6,7 +6,6 @@ from .models import *
 admin.site.register(User,ModelAdmin)
 admin.site.register(Company,ModelAdmin)
 admin.site.register(Service,ModelAdmin)
-admin.site.register(CompanyInfo,ModelAdmin)
 admin.site.register(Employee,ModelAdmin)
 
 

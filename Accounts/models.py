@@ -147,18 +147,6 @@ class Service(models.Model):
 
     history = HistoricalRecords()
 
-class CompanyInfo(models.Model):
-    company = models.OneToOneField(Company, on_delete=models.CASCADE, related_name='info')
-    name = models.TextField(blank=True, null=True)
-    details = models.TextField(blank=True, null=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"Info for {self.company.name}"
-
-    history = HistoricalRecords()
-
 class Employee(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='employee')
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='employees')

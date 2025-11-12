@@ -10,10 +10,9 @@ from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction
 from django.utils import timezone
-from .models import Plan, CompanyPlan, StripeCredential, Payment, Company
 import stripe
-from datetime import timedelta
-import pytz
+from decimal import Decimal
+from django.http import Http404
 # Create your views here.
 
 class StripeListCreateView(generics.ListCreateAPIView):
@@ -58,119 +57,182 @@ class GetPlans(APIView):
         plans = Plan.objects.all()  
         serializer = self.serializer_class(plans, many=True)  
         return Response(serializer.data)
-        
-
     
+def get_stripe_client(company=None, use_env=False):
+    """Return Stripe client configuration."""
+    if use_env:
+        # Use global environment Stripe credentials
+        return stripe, settings.STRIPE_SECRET_KEY, settings.STRIPE_WEBHOOK_SECRET
 
+    if not company:
+        raise ValueError("Company is required for company-based Stripe credentials")
 
-def get_stripe_client(company):
-    """Return stripe client for a specific company."""
-    cred = StripeCredential.objects.get(company=company)
-    return stripe, cred.api_key, cred.webhook_secret
+    try:
+        cred = StripeCredential.objects.get(company=company)
+        return stripe, cred.api_key, cred.webhook_secret
+    except StripeCredential.DoesNotExist:
+        raise Http404("Stripe credentials not found for this company.")
 
-def create_checkout_session(request, company, plan=None, amount=None, reason=None):
-    """Create a Stripe checkout session for subscription or one-time payment."""
-    stripe_client, api_key, webhook_secret = get_stripe_client(company)
-    stripe_client.api_key = api_key
+def create_checkout_session(request, company_id, plan_id=None):
+    """Create Stripe Checkout session for subscription or one-time payment."""
+    try:
+        company = Company.objects.get(id=company_id)
+        cred = StripeCredential.objects.get(company=company)
+    except (Company.DoesNotExist, StripeCredential.DoesNotExist):
+        return HttpResponse("Company or Stripe credentials not found", status=404)
 
-    # For subscription
-    if plan:
+    # Determine if subscription
+    is_subscription = bool(plan_id)
+
+    if is_subscription:
+        try:
+            plan = Plan.objects.get(id=plan_id)
+        except Plan.DoesNotExist:
+            return HttpResponse("Plan not found", status=404)
+
+        # Subscription uses ENV credentials
+        stripe_client, api_key, webhook_secret = get_stripe_client(use_env=True)
+
         price_data = {
             'currency': 'usd',
-            'product_data': {'name': f"{plan.name} ({plan.duration})"},
+            'product_data': {'name': f"{plan.get_name_display()} ({plan.get_duration_display()})"},
             'unit_amount': int(plan.price) * 100
         }
-        mode = 'payment'
+
         metadata = {
-            'company_id': company.id,
-            'plan_id': plan.id
+            'type': 'subscription',
+            'company_id': str(company.id),
+            'plan_id': str(plan.id),
+            'amount': str(plan.price)  # important for webhook
         }
-        success_url = request.build_absolute_uri('/payment-success/')
-        cancel_url = request.build_absolute_uri('/payment-cancel/')
-    # For normal payment
-    elif amount and reason:
+
+    else:
+        # One-time payment uses company credentials
+        stripe_client, api_key, webhook_secret = get_stripe_client(company=company)
+        amount = request.GET.get('amount', 5)
+        reason = request.GET.get('reason', 'One-time Payment')
+
         price_data = {
             'currency': 'usd',
             'product_data': {'name': reason},
-            'unit_amount': int(amount * 100)
+            'unit_amount': int(float(amount) * 100)
         }
-        mode = 'payment'
-        metadata = {
-            'company_id': company.id,
-            'reason': reason,
-            'amount': amount
-        }
-        success_url = request.build_absolute_uri('/payment-success/')
-        cancel_url = request.build_absolute_uri('/payment-cancel/')
-    else:
-        return HttpResponse("Invalid payment data", status=400)
 
+        metadata = {
+            'type': 'payment',
+            'company_id': str(company.id),
+            'reason': reason,
+            'amount': str(amount)
+        }
+
+    stripe_client.api_key = api_key
+
+    # Create checkout session
     session = stripe_client.checkout.Session.create(
         payment_method_types=["card"],
-        line_items=[{
-            'price_data': price_data,
-            'quantity': 1
-        }],
-        mode=mode,
-        success_url=success_url,
-        cancel_url=cancel_url,
+        line_items=[{'price_data': price_data, 'quantity': 1}],
+        mode='payment',
+        success_url=request.build_absolute_uri('/payment-success/'),
+        cancel_url=request.build_absolute_uri('/payment-cancel/'),
         metadata=metadata
     )
+
     return redirect(session.url, code=303)
 
 def payment_success(request):
     return HttpResponse("✅ Payment successful!")
+
 
 def payment_cancel(request):
     return HttpResponse("❌ Payment cancelled.")
 
 @csrf_exempt
 def stripe_webhook(request):
+    """Handle Stripe webhook for subscriptions and one-time payments."""
     payload = request.body
     sig_header = request.META.get('HTTP_STRIPE_SIGNATURE', '')
-    print("📥 Stripe webhook received!")
 
-    # We assume company is passed in metadata
-    try:
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
-        )
-    except Exception as e:
-        print("❌ Webhook error:", str(e))
+    # Collect all webhook secrets
+    webhook_secrets = [settings.STRIPE_WEBHOOK_SECRET]
+    webhook_secrets += list(StripeCredential.objects.values_list('webhook_secret', flat=True))
+
+    event = None
+    for secret in webhook_secrets:
+        try:
+            event = stripe.Webhook.construct_event(payload, sig_header, secret)
+            break
+        except Exception:
+            continue
+
+    if not event:
+        print("❌ Invalid Stripe signature for all known secrets.")
         return HttpResponse(status=400)
 
-    # Handle checkout session completed
-    if event['type'] == 'checkout.session.completed':
-        session = event['data']['object']
-        metadata = session.get('metadata', {})
-        company_id = metadata.get('company_id')
+    print("✅ Verified event:", event['type'])
+    data = event['data']['object']
+    metadata = data.get('metadata', {})
 
-        if not company_id:
-            print("❌ No company_id in metadata")
-            return HttpResponse(status=400)
+    company_id = metadata.get('company_id')
+    if not company_id:
+        print("⚠️ Missing company_id in metadata.")
+        return HttpResponse("Missing company_id", status=400)
 
+    try:
+        company = Company.objects.get(id=company_id)
+    except Company.DoesNotExist:
+        print(f"⚠️ Company {company_id} not found.")
+        return HttpResponse("Company not found", status=404)
+
+    # Amount handling
+    raw_amount = metadata.get('amount', None)
+    if raw_amount is not None:
         try:
-            company = Company.objects.get(id=company_id)
-            # Subscription
+            amount = Decimal(raw_amount)
+        except Exception:
+            amount = Decimal('0')
+    else:
+        # Fallback: get amount from Stripe session (in cents)
+        amount_cents = data.get('amount_total') or data.get('amount')
+        if amount_cents:
+            amount = Decimal(amount_cents) / 100
+        else:
+            amount = Decimal('0')
+
+    if event['type'] == 'checkout.session.completed':
+        meta_type = metadata.get('type', '')
+
+        if meta_type == 'subscription':
             plan_id = metadata.get('plan_id')
+            plan = None
             if plan_id:
-                plan = Plan.objects.get(id=plan_id)
-                CompanyPlan.objects.update_or_create(
-                    company=company,
-                    plan=plan,
-                    defaults={'start_date': timezone.now(), 'end_date': None}
-                )
-                print(f"✅ {company.name} subscribed to {plan.name}")
-            # One-time payment
-            elif metadata.get('reason') and metadata.get('amount'):
-                Payment.objects.create(
-                    company=company,
-                    reason=metadata['reason'],
-                    amount=metadata['amount'],
-                    transaction_id=session['id']
-                )
-                print(f"✅ Payment recorded for {company.name}")
-        except Exception as e:
-            print("💥 Error handling payment:", str(e))
+                try:
+                    plan = Plan.objects.get(id=plan_id)
+                except Plan.DoesNotExist:
+                    print(f"⚠️ Plan {plan_id} not found.")
+                    
+            # Record payment
+            Payment.objects.create(
+                company=company,
+                reason=f"Subscription: {plan.get_name_display() if plan else 'Unknown'}",
+                amount=amount,
+                type = 'subscriptions',
+                transaction_id=data['id'],
+                payment_date=timezone.now()
+            )
+
+            print(f"✅ Subscription activated for {company.name}, amount: {amount}")
+
+        elif meta_type == 'payment':
+            Payment.objects.create(
+                company=company,
+                reason=metadata.get('reason', 'Payment'),
+                amount=amount,
+                transaction_id=data['id'],
+                payment_date=timezone.now()
+            )
+            print(f"✅ One-time payment recorded for {company.name}, amount: {amount}")
+
+        else:
+            print(f"⚠️ Unknown metadata type: {meta_type}")
 
     return HttpResponse(status=200)

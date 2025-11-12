@@ -2,7 +2,7 @@
 from rest_framework import permissions
 
 PERMISSIONS_MATRIX = {
-    'user': {
+    'owner': {
         'view_dashboard': True,
         'manage_users': True,
         'financial_data': True,
@@ -69,10 +69,10 @@ PERMISSION_NAMES = {
     'api_management': 'API Management',
 }
 
-class Isuser(permissions.BasePermission):
-    """Allow access only to users."""
+class IsOwner(permissions.BasePermission):
+    """Allow access only to owners."""
     def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated and request.user.is_user)
+        return bool(request.user and request.user.is_authenticated and request.user.is_owner)
 
 
 class IsEmployee(permissions.BasePermission):
@@ -81,11 +81,11 @@ class IsEmployee(permissions.BasePermission):
         return bool(request.user and request.user.is_authenticated and request.user.is_employee)
 
 
-class IsuserOrEmploye(permissions.BasePermission):
-    """Allow access to admins or users."""
+class IsOwnerOrEmploye(permissions.BasePermission):
+    """Allow access to admins or owners."""
     def has_permission(self, request, view):
         return bool(
             request.user
             and request.user.is_authenticated
-            and (request.user.is_employee or request.user.is_user)
+            and (request.user.is_employee or request.user.is_owner)
         )

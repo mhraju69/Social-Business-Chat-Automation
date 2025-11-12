@@ -24,6 +24,9 @@ AI_TOKEN = os.getenv('AI_TOKEN')
 FB_APP_ID = os.getenv('FB_APP_ID')
 FB_APP_SECRET = os.getenv('FB_APP_SECRET')
 FIELD_ENCRYPTION_KEY = os.getenv('FIELD_ENCRYPTION_KEY').encode()
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-7#$m=&$%3a_op)s4yr7qy2+424rs4#)2xi%9nj$in&0-*xqdmf'
@@ -33,15 +36,18 @@ ALLOWED_HOSTS = ['*']
 # settings.py
 CSRF_TRUSTED_ORIGINS = [
     "https://ape-in-eft.ngrok-free.app",
-    'http://localhost:8080',
-    'http://127.0.0.1:8080'
+    'http://localhost:3000'
 ]
-
-DEBUG = True
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",  
+]
+#DEBUG = True
+DEBUG = False
 # Application definition
 
 INSTALLED_APPS = [
     'unfold',
+    "corsheaders",
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -59,6 +65,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    "corsheaders.middleware.CorsMiddleware",
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',

@@ -27,23 +27,6 @@ class PlanValue(models.Model):
 
     def __str__(self):
         return f"{self.plan.name} - {self.value}"
-
-class CompanyPlan(models.Model):
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='subscription_plans')
-    plan = models.ForeignKey(Plan,on_delete=models.PROTECT)
-
-    start_date = models.DateField(auto_now_add=True)
-    end_date = models.DateField(null=True, blank=True)
-
-    class Meta:
-        unique_together = ('company', 'plan') 
-        verbose_name = "Company Plan"
-        verbose_name_plural = "Company Plans"
-
-    def __str__(self):
-        return f"{self.company.name} - {self.plan.name}"
-    
-    history = HistoricalRecords()
     
 class StripeCredential(models.Model):
     company = models.OneToOneField(Company,related_name='stripe',  on_delete=models.CASCADE)
@@ -54,15 +37,17 @@ class StripeCredential(models.Model):
     history = HistoricalRecords()
 
     def __str__(self):
-        return self.company.name
+        return self.company.user.email
     
 class Payment(models.Model):
+    TYPE = [("subscriptions","Subscriptions"),("servies","Services")]
     company = models.ForeignKey(
         Company,
         related_name='payments',  
         on_delete=models.CASCADE
     )
-    reason = models.CharField(max_length=255, verbose_name="Payment Reason")
+    type = models.CharField(max_length=20,choices=TYPE,default="servies")
+    reason = models.CharField(max_length=255, verbose_name="Payment Reason",blank=True,null=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Payment Amount")
     transaction_id = models.CharField(max_length=100, verbose_name="Transaction ID")
     payment_date = models.DateTimeField(auto_now_add=True, verbose_name="Payment Date")
