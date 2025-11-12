@@ -680,3 +680,14 @@ class MarkAlertReadView(APIView):
             return Response({"detail": "Alert marked as read"})
         except Alert.DoesNotExist:
             return Response({"detail": "Alert not found"}, status=status.HTTP_404_NOT_FOUND)
+
+class KnowledgeBaseListCreateView(generics.ListCreateAPIView):
+    queryset = KnowledgeBase.objects.all()
+    serializer_class = KnowledgeBaseSerializer
+    permission_classes = [permissions.IsAuthenticated]  # optional, remove if public
+
+class KnowledgeBaseRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
+    queryset = KnowledgeBase.objects.all()
+    serializer_class = KnowledgeBaseSerializer
+    permission_classes = [permissions.IsAuthenticated]  # optional
+    lookup_field = 'id'

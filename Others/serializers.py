@@ -345,3 +345,8 @@ class AlertSerializer(serializers.ModelSerializer):
         model = Alert
         fields = ["id", "title", "subtitle", "time", "type", "is_read"]
 
+class KnowledgeBaseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = KnowledgeBase
+        fields = '__all__'
+

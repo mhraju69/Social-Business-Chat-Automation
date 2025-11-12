@@ -19,5 +19,7 @@ urlpatterns = [
     path('opening-hours/<int:id>/', OpeningHoursUpdateDeleteView.as_view(), name='opening-hours-update-delete'),
     path('alerts/', UserAlertsView.as_view(), name='user-alerts'),
     path('alerts/<int:alert_id>/read/', MarkAlertReadView.as_view(), name='mark-alert-read'),
+    path('knowledge-base/', KnowledgeBaseListCreateView.as_view(), name='knowledgebase-list-create'),
+    path('knowledge-base/<int:id>/', KnowledgeBaseRetrieveUpdateDestroyView.as_view(), name='knowledgebase-detail'),
 
 ]

@@ -160,4 +160,16 @@ class Alert(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.title}"
-    
+
+class KnowledgeBase(models.Model):
+    name = models.CharField(max_length=255)
+    details = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = "Knowledge Base"
+        verbose_name_plural = "Knowledge Base Entries"
+
+    def __str__(self):
+        return self.name
