@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 from rest_framework.permissions import IsAuthenticated
 from django.views.decorators.csrf import csrf_exempt
 from .models import *
+from Finance.models import *
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from .serializers import *
@@ -289,6 +290,7 @@ class BookingAPIView(APIView):
 class DashboardView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
+    # --- Chat related function ---
     def get_open_chats_count(self, user, minutes=10):
         user_profiles = ChatProfile.objects.filter(user=user)
         rooms = ChatRoom.objects.filter(profile__in=user_profiles)
@@ -304,10 +306,61 @@ class DashboardView(APIView):
 
         return open_chat_count
 
+    # --- Payment related function ---
+    def get_today_payments(self, company, timezone_name=None):
+        """
+        এই ফাংশনটি company এর আজকের payment return করে
+        count এবং details সহ। timezone_name optional।
+        """
+        tz_name = timezone_name or getattr(company, 'timezone', 'UTC')
+        company_tz = pytz.timezone(tz_name)
+
+        now_utc = timezone.now()
+        now_local = now_utc.astimezone(company_tz)
+
+        start_of_day = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = start_of_day + timedelta(days=1)
+
+        # Convert to UTC for DB query
+        start_utc = start_of_day.astimezone(pytz.UTC)
+        end_utc = end_of_day.astimezone(pytz.UTC)
+
+        payments_qs = Payment.objects.filter(
+            company=company,
+            type = 'services',
+            payment_date__gte=start_utc,
+            payment_date__lt=end_utc
+        )
+
+        # Prepare list of payment details
+        payment_list = []
+        for payment in payments_qs:
+            payment_list.append({
+                "transaction_id": payment.transaction_id,
+                "amount": float(payment.amount),
+                "type": payment.type,
+                "reason": payment.reason,
+                "payment_date": payment.payment_date.astimezone(company_tz).strftime("%Y-%m-%d %H:%M:%S")
+            })
+
+        return {
+            "count": payments_qs.count(),
+            "payments": payment_list
+        }
+
+    # --- Dashboard API endpoint ---
     def get(self, request, *args, **kwargs):
+ 
+        timezone_name = request.query_params.get('timezone', None)
+
         open_chat_count = self.get_open_chats_count(request.user, minutes=10)
+
+        company = getattr(request.user, 'company', None)  
+        today_payments = self.get_today_payments(company, timezone_name) if company else {"count": 0, "payments": []}
+
         return Response({
-            "open_chat": open_chat_count
+            "open_chat": open_chat_count,
+            "today_payments": today_payments
         })
         
     

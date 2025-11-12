@@ -40,13 +40,13 @@ class StripeCredential(models.Model):
         return self.company.user.email
     
 class Payment(models.Model):
-    TYPE = [("subscriptions","Subscriptions"),("servies","Services")]
+    TYPE = [("subscriptions","Subscriptions"),("services","Services")]
     company = models.ForeignKey(
         Company,
         related_name='payments',  
         on_delete=models.CASCADE
     )
-    type = models.CharField(max_length=20,choices=TYPE,default="servies")
+    type = models.CharField(max_length=20,choices=TYPE,default="services")
     reason = models.CharField(max_length=255, verbose_name="Payment Reason",blank=True,null=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Payment Amount")
     transaction_id = models.CharField(max_length=100, verbose_name="Transaction ID")
