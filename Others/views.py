@@ -308,10 +308,6 @@ class DashboardView(APIView):
 
     # --- Payment related function ---
     def get_today_payments(self, company, timezone_name=None):
-        """
-        এই ফাংশনটি company এর আজকের payment return করে
-        count এবং details সহ। timezone_name optional।
-        """
         tz_name = timezone_name or getattr(company, 'timezone', 'UTC')
         company_tz = pytz.timezone(tz_name)
 
@@ -321,18 +317,17 @@ class DashboardView(APIView):
         start_of_day = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         end_of_day = start_of_day + timedelta(days=1)
 
-        # Convert to UTC for DB query
         start_utc = start_of_day.astimezone(pytz.UTC)
         end_utc = end_of_day.astimezone(pytz.UTC)
 
         payments_qs = Payment.objects.filter(
             company=company,
-            type = 'services',
             payment_date__gte=start_utc,
             payment_date__lt=end_utc
         )
 
-        # Prepare list of payment details
+        total_amount = sum(payment.amount for payment in payments_qs)
+
         payment_list = []
         for payment in payments_qs:
             payment_list.append({
@@ -344,25 +339,86 @@ class DashboardView(APIView):
             })
 
         return {
-            "count": payments_qs.count(),
-            "payments": payment_list
+            "total": float(total_amount),
+            "list": payment_list
         }
 
+    # --- Booking related function ---
+    def get_today_meetings(self, company, timezone_name=None):
+        tz_name = timezone_name or getattr(company, 'timezone', 'UTC')
+        company_tz = pytz.timezone(tz_name)
+
+        now_utc = timezone.now()
+        now_local = now_utc.astimezone(company_tz)
+
+        # আজকের শুরু এবং শেষ সময়
+        start_of_day = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = start_of_day + timedelta(days=1)
+        start_utc = start_of_day.astimezone(pytz.UTC)
+        end_utc = end_of_day.astimezone(pytz.UTC)
+
+        # আজকের meetings
+        today_qs = Booking.objects.filter(
+            company=company,
+            start_time__gte=start_utc,
+            start_time__lt=end_utc
+        )
+
+        today_meetings_list = []
+        for booking in today_qs:
+            today_meetings_list.append({
+                "title": booking.title,
+                "client": booking.client,
+                "start_time": booking.start_time.astimezone(company_tz).strftime("%Y-%m-%d %H:%M:%S"),
+                "end_time": booking.end_time.astimezone(company_tz).strftime("%Y-%m-%d %H:%M:%S") if booking.end_time else None,
+                "location": booking.location,
+                "price": booking.price,
+                "notes": booking.notes,
+                "event_link": booking.event_link
+            })
+
+        # Remaining meetings (আগামীকাল বা পরে)
+        tomorrow_start = end_of_day
+        tomorrow_start_utc = tomorrow_start.astimezone(pytz.UTC)
+
+        remaining_count = Booking.objects.filter(
+            company=company,
+            start_time__gte=tomorrow_start_utc
+        ).count()
+
+        return {
+            "count": today_qs.count(),
+            "list": today_meetings_list,
+            "remaining": remaining_count
+        }
+
+    def get_chat_channel_status(self, user):
+
+        platforms = ['whatsapp', 'facebook', 'instagram']
+        status = {}
+
+        for platform in platforms:
+            exists = ChatProfile.objects.filter(user=user, platform=platform).exists()
+            status[platform] = exists
+
+        return status
+    
     # --- Dashboard API endpoint ---
     def get(self, request, *args, **kwargs):
- 
         timezone_name = request.query_params.get('timezone', None)
+        company = getattr(request.user, 'company', None)
 
         open_chat_count = self.get_open_chats_count(request.user, minutes=10)
-
-        company = getattr(request.user, 'company', None)  
-        today_payments = self.get_today_payments(company, timezone_name) if company else {"count": 0, "payments": []}
+        today_payments = self.get_today_payments(company, timezone_name) if company else {"total_amount": 0, "payments": []}
+        today_meetings = self.get_today_meetings(company, timezone_name) if company else {"today_count": 0, "today_meetings": [], "remaining_count": 0}
+        chat_status = self.get_chat_channel_status(request.user)
 
         return Response({
-            "open_chat": open_chat_count,
-            "today_payments": today_payments
+            "open_cha": open_chat_count,
+            "today_payments": today_payments,
+            "today_meetings": today_meetings,
+             "channel_status": chat_status
         })
-        
     
 class AnalyticsView(APIView):
     permission_classes = [permissions.IsAuthenticated]
