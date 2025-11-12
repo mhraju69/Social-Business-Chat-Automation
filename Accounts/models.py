@@ -87,10 +87,6 @@ class Company(models.Model):
     city = models.CharField(max_length=100, blank=True, null=True)
     country = models.CharField(max_length=100, blank=True, null=True)
 
-    # Map preview could be integrated later via coordinates
-    latitude = models.CharField(max_length=100, blank=True, null=True)
-    longitude = models.CharField(max_length=100, blank=True, null=True)
-
     system_language = models.CharField(max_length=50, default='English')
 
     # Tone & Personality
@@ -140,8 +136,8 @@ class Service(models.Model):
     name = models.CharField(max_length=255, verbose_name="Service Name")
     description = models.TextField(blank=True, null=True, verbose_name="Service Description")
     price = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Service Price")
-    duration_minutes = models.PositiveIntegerField(verbose_name="Service Duration (minutes)", default=60)
-
+    start_time = models.TimeField(blank=True, null=True)
+    end_time = models.TimeField(blank=True, null=True)
     def __str__(self):
         return self.name
 

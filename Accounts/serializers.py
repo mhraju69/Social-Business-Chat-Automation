@@ -73,16 +73,5 @@ class CompanySerializer(serializers.ModelSerializer):
 class ServiceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Service
-        fields = ['id', 'name', 'description', 'price', 'duration_minutes', 'company']
+        fields = ['id','name', 'description', 'price', 'start_time','end_time']
         read_only_fields = ['company']
-
-    def create(self, validated_data):   
-        user = self.context['request'].user
-        validated_data['company'] = user.company.first()
-        return super().create(validated_data)
-
-    def create(self, validated_data):
-        user = self.context['request'].user
-        validated_data['company'] = user.company.first()
-        return super().create(validated_data)   
-    
