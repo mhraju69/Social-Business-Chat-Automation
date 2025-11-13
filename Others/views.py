@@ -8,285 +8,73 @@ from rest_framework.permissions import IsAuthenticated
 from django.views.decorators.csrf import csrf_exempt
 from .models import *
 from Finance.models import *
+from django.conf import settings
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from .serializers import *
 from django.apps import apps
 from rest_framework.exceptions import PermissionDenied
+import requests
 
-@api_view(['POST'])
-def connect_google(request):
-    """
-    Creates Google OAuth2 authorization URL dynamically based on current domain.
-    """
-    client_id = request.data.get('client_id')
-    client_secret = request.data.get('client_secret')
+def get_google_access_token(google_account):
+    data = {
+        "client_id": google_account.client_id or settings.GOOGLE_CLIENT_ID,
+        "client_secret": google_account.client_secret or settings.GOOGLE_CLIENT_SECRET,
+        "refresh_token": google_account.refresh_token,
+        "grant_type": "refresh_token",
+    }
+    response = requests.post(google_account.token_uri, data=data)
+    result = response.json()
+    return result.get("access_token")
 
-    if not client_id or not client_secret:
-        return Response(
-            {"error": "Missing client_id or client_secret."},
-            status=status.HTTP_400_BAD_REQUEST
+class ClientBookingView(APIView):
+    def post(self, request, company_id):
+        company = Company.objects.filter(id=company_id).first()
+        if not company:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+
+        if not hasattr(company, 'google_account'):
+            return Response({"error": "Company has not connected Google Calendar"}, status=400)
+
+        serializer = BookingSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        
+        booking = serializer.save(company=company)
+
+        # create event in Google Calendar
+        google_account = company.google_account
+        access_token = get_google_access_token(google_account)
+        if not access_token:
+            return Response({"error": "Unable to get access token"}, status=400)
+
+        event_data = {
+            "summary": booking.title,
+            "description": booking.notes or "",
+            "start": {"dateTime": booking.start_time.isoformat(), "timeZone": company.timezone},
+            "end": {"dateTime": booking.end_time.isoformat() if booking.end_time else booking.start_time.isoformat(), 
+                    "timeZone": company.timezone},
+            "location": booking.location or "",
+            "attendees": [{"email": booking.client}] if booking.client else [],
+        }
+
+        headers = {"Authorization": f"Bearer {access_token}"}
+        response = requests.post(
+            "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+            headers=headers,
+            json=event_data
         )
 
-    try:
-        # ✅ Dynamically build redirect URI using URL name
-        redirect_uri = request.build_absolute_uri(reverse('google_callback'))
+        if response.status_code in [200, 201]:
+            event = response.json()
+            booking.google_event_id = event.get("id")
+            booking.event_link = event.get("htmlLink")
+            booking.save()
+        else:
+            return Response({"error": "Failed to create Google Calendar event", "details": response.json()},
+                            status=response.status_code)
 
-        flow = Flow.from_client_config(
-            {
-                "web": {
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "redirect_uris": [redirect_uri],
-                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token",
-                }
-            },
-            scopes=["https://www.googleapis.com/auth/calendar"]
-        )
-
-        flow.redirect_uri = redirect_uri
-
-        auth_url, _ = flow.authorization_url(
-            prompt='consent',
-            access_type='offline',
-            include_granted_scopes='true'
-        )
-
-        return Response({
-            "auth_url": auth_url,
-            "redirect_uri": redirect_uri  # optional, for debugging
-        })
-
-    except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-@csrf_exempt
-@api_view(['POST'])
-def google_callback(request):
-    from django.urls import reverse
-    from google_auth_oauthlib.flow import Flow
-    import google.auth.transport.requests
-
-    client_id = request.data.get("client_id")
-    client_secret = request.data.get("client_secret")
-    auth_response = request.data.get("auth_response")
-
-    if not client_id or not client_secret or not auth_response:
-        return Response(
-            {"error": "Missing client_id, client_secret, or auth_response."},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-
-    try:
-        # ✅ Dynamically rebuild redirect URI
-        redirect_uri = request.build_absolute_uri(reverse('google_callback'))
-
-        flow = Flow.from_client_config(
-            {
-                "web": {
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "redirect_uris": [redirect_uri],
-                    "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-                    "token_uri": "https://oauth2.googleapis.com/token",
-                }
-            },
-            scopes=["https://www.googleapis.com/auth/calendar"]
-        )
-
-        flow.redirect_uri = redirect_uri
-        flow.fetch_token(authorization_response=auth_response)
-
-        creds = flow.credentials
-        user = request.user if request.user.is_authenticated else None
-
-        GoogleAccount.objects.update_or_create(
-            user=user,
-            defaults={
-                "access_token": creds.token,
-                "refresh_token": creds.refresh_token,
-                "client_id": client_id,
-                "client_secret": client_secret,
-                "scopes": " ".join(creds.scopes),
-            }
-        )
-
-        return Response({"message": "Google account connected successfully"})
-
-    except Exception as e:
-        return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-class BookingAPIView(APIView):
-    """
-    APIView to Create, Update, and Delete bookings.
-    Checks DB and optionally Google Calendar for conflicts.
-    """
-
-    def _get_google_service(self, company_id):
-        try:
-            google_account = GoogleAccount.objects.get(user__company_id=company_id)
-            creds = Credentials(
-                token=google_account.access_token,
-                refresh_token=google_account.refresh_token,
-                token_uri="https://oauth2.googleapis.com/token",
-                client_id=google_account.client_id,
-                client_secret=google_account.client_secret,
-                scopes=["https://www.googleapis.com/auth/calendar"]
-            )
-            service = build("calendar", "v3", credentials=creds)
-            return service
-        except GoogleAccount.DoesNotExist:
-            return None
-
-    def _check_db_conflict(self, company_id, start_time, end_time, exclude_id=None):
-        qs = Booking.objects.filter(
-            company_id=company_id,
-            start_time__lt=end_time,
-            end_time__gt=start_time
-        )
-        if exclude_id:
-            qs = qs.exclude(id=exclude_id)
-        return qs.exists()
-
-    def _check_google_conflict(self, service, start_time, end_time):
-        if not service:
-            return False
-        try:
-            body = {
-                "timeMin": start_time.isoformat() + 'Z',
-                "timeMax": end_time.isoformat() + 'Z',
-                "timeZone": "UTC",
-                "items": [{"id": "primary"}]
-            }
-            freebusy = service.freebusy().query(body=body).execute()
-            busy_times = freebusy['calendars']['primary']['busy']
-            return bool(busy_times)
-        except Exception:
-            # If Google API fails, we assume slot is free to avoid blocking
-            return False
-
-    # ---------------- CREATE ----------------
-    def post(self, request):
-        data = request.data
-        company_id = data.get("company_id")
-        title = data.get("title")
-        description = data.get("description", "")
-        start_time = data.get("start_time")
-        end_time = data.get("end_time")
-
-        if not all([company_id, title, start_time, end_time]):
-            return Response({"error": "Missing required fields"}, status=status.HTTP_400_BAD_REQUEST)
-
-        try:
-            start_time = timezone.datetime.fromisoformat(start_time)
-            end_time = timezone.datetime.fromisoformat(end_time)
-        except ValueError:
-            return Response({"error": "Invalid datetime format"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # DB conflict
-        if self._check_db_conflict(company_id, start_time, end_time):
-            return Response({"error": "Time slot already booked in DB"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Google Calendar conflict
-        service = self._get_google_service(company_id)
-        if self._check_google_conflict(service, start_time, end_time):
-            return Response({"error": "Time slot not available in Google Calendar"}, status=status.HTTP_400_BAD_REQUEST)
-
-        google_event_id = None
-        event_link = None
-
-        if service:
-            # Create event in Google Calendar
-            event_body = {
-                "summary": title,
-                "description": description,
-                "start": {"dateTime": start_time.isoformat(), "timeZone": "UTC"},
-                "end": {"dateTime": end_time.isoformat(), "timeZone": "UTC"},
-            }
-            event = service.events().insert(calendarId='primary', body=event_body).execute()
-            google_event_id = event.get('id')
-            event_link = event.get('htmlLink')
-
-        booking = Booking.objects.create(
-            company_id=company_id,
-            title=title,
-            description=description,
-            start_time=start_time,
-            end_time=end_time,
-            google_event_id=google_event_id,
-            event_link=event_link
-        )
-
-        return Response({"message": "Booking created", "booking_id": booking.id, "google_event_link": event_link}, status=status.HTTP_201_CREATED)
-
-    # ---------------- UPDATE ----------------
-    def put(self, request, booking_id):
-        data = request.data
-        try:
-            booking = Booking.objects.get(id=booking_id)
-        except Booking.DoesNotExist:
-            return Response({"error": "Booking not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        title = data.get("title", booking.title)
-        description = data.get("description", booking.description)
-        start_time = data.get("start_time", booking.start_time.isoformat())
-        end_time = data.get("end_time", booking.end_time.isoformat())
-
-        try:
-            start_time = timezone.datetime.fromisoformat(start_time)
-            end_time = timezone.datetime.fromisoformat(end_time)
-        except ValueError:
-            return Response({"error": "Invalid datetime format"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # DB conflict
-        if self._check_db_conflict(booking.company_id, start_time, end_time, exclude_id=booking.id):
-            return Response({"error": "Time slot already booked in DB"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Google Calendar conflict
-        service = self._get_google_service(booking.company_id)
-        if self._check_google_conflict(service, start_time, end_time):
-            return Response({"error": "Time slot not available in Google Calendar"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # Update Google Event if exists
-        if service and booking.google_event_id:
-            event_body = {
-                "summary": title,
-                "description": description,
-                "start": {"dateTime": start_time.isoformat(), "timeZone": "UTC"},
-                "end": {"dateTime": end_time.isoformat(), "timeZone": "UTC"},
-            }
-            service.events().update(calendarId='primary', eventId=booking.google_event_id, body=event_body).execute()
-
-        # Update DB
-        booking.title = title
-        booking.description = description
-        booking.start_time = start_time
-        booking.end_time = end_time
-        booking.save()
-
-        return Response({"message": "Booking updated", "booking_id": booking.id}, status=status.HTTP_200_OK)
-
-    # ---------------- DELETE ----------------
-    def delete(self, request, booking_id):
-        try:
-            booking = Booking.objects.get(id=booking_id)
-        except Booking.DoesNotExist:
-            return Response({"error": "Booking not found"}, status=status.HTTP_404_NOT_FOUND)
-
-        service = self._get_google_service(booking.company_id)
-
-        # Delete from Google Calendar if exists
-        if service and booking.google_event_id:
-            try:
-                service.events().delete(calendarId='primary', eventId=booking.google_event_id).execute()
-            except Exception:
-                pass  # ignore Google errors
-
-        # Delete from DB
-        booking.delete()
-        return Response({"message": "Booking deleted"}, status=status.HTTP_200_OK)
-
+        return Response(BookingSerializer(booking).data, status=status.HTTP_201_CREATED)
+    
 class DashboardView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
@@ -460,7 +248,6 @@ class UserActivityLogView(APIView):
         tracked_models = [
             {'model': 'Service', 'app': 'Accounts'},
             {'model': 'User', 'app': 'Accounts'},
-            {'model': 'CompanyInfo', 'app': 'Accounts'},
             {'model': 'Company', 'app': 'Accounts'},
         ]
         
@@ -691,3 +478,21 @@ class KnowledgeBaseRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIVi
     serializer_class = KnowledgeBaseSerializer
     permission_classes = [permissions.IsAuthenticated]  # optional
     lookup_field = 'id'
+
+class GoogleConnectView(generics.CreateAPIView):
+    serializer_class = GoogleAccountSerializer
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        company = Company.objects.filter(user=request.user).first()
+        if not company:
+            return Response({'error': 'Company not found'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Check if already connected
+        google_account, created = GoogleAccount.objects.get_or_create(company=company)
+        serializer = self.get_serializer(google_account, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(company=company)
+
+        msg = "Google account connected successfully" if created else "Google account updated successfully"
+        return Response({"message": msg, "data": serializer.data}, status=status.HTTP_200_OK)

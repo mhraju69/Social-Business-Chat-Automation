@@ -12,7 +12,7 @@ class Booking(models.Model):
     title = models.CharField(max_length=255)
     start_time = models.DateTimeField()
     end_time = models.DateTimeField(blank=True, null=True)
-    client = models.CharField(max_length=255,blank=True, null=True)
+    client = models.EmailField(blank=True, null=True)
     location = models.CharField(max_length=255,blank=True, null=True)
     price = models.CharField(max_length=100, blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
@@ -94,16 +94,15 @@ class FAQ(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
     
 class GoogleAccount(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE)
+    company = models.OneToOneField(Company, on_delete=models.CASCADE, related_name='google_account')
     access_token = models.TextField()
     refresh_token = models.TextField()
     token_uri = models.TextField(default='https://oauth2.googleapis.com/token')
-    client_id = models.TextField()
-    client_secret = models.TextField()
     scopes = models.JSONField(default=list)
+    token_expiry = models.DateTimeField(blank=True, null=True)
 
     def __str__(self):
-        return f"{self.user.email} - Google Connected"
+        return f"{self.company.name} - Google Connected"
     
 class ChatBot(models.Model):
     user = models.OneToOneField(

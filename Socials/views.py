@@ -25,7 +25,7 @@ class FacebookConnectView(APIView):
         fb_app_id = settings.FB_APP_ID
         redirect_uri = "https://ape-in-eft.ngrok-free.app/facebook/callback/"
         scope = "pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging"
-        state = 2
+        state = 1
         # state = request.user.id
 
         fb_login_url = (
