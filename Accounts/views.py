@@ -405,3 +405,84 @@ class UpdatePermissionsView(APIView):
             status=status.HTTP_200_OK
         )
 
+class SocialAuthCallbackView(APIView):
+    permission_classes = [permissions.AllowAny]
+    def post(self, request):
+        access_token = request.data.get('access_token')
+        
+        if not access_token:
+            return Response({'error': 'No access token provided'}, status=400)
+        print(access_token)
+        try:
+            # Verify token
+            token_info_response = requests.get(
+                f'https://www.googleapis.com/oauth2/v1/tokeninfo?access_token={access_token}'
+            )
+
+            if token_info_response.status_code != 200:
+                return Response({'error': 'Invalid access token'}, status=400)
+
+            token_info = token_info_response.json()
+
+            if 'error' in token_info:
+                return Response({'error': token_info['error']}, status=400)
+
+            # Get basic user info
+            user_info_response = requests.get(
+                'https://www.googleapis.com/oauth2/v2/userinfo',
+                headers={'Authorization': f'Bearer {access_token}'}
+            )
+
+            user_data = user_info_response.json()
+            profile_image_url = user_data.get("picture")
+            email = user_data.get("email")
+            name = user_data.get("name")
+
+            people_api_url = "https://people.googleapis.com/v1/people/me?personFields=birthdays,phoneNumbers"
+            people_response = requests.get(
+                people_api_url,
+                headers={'Authorization': f'Bearer {access_token}'}
+            )
+
+            
+            try:
+                people_json = people_response.json()
+            except Exception as json_err:
+                people_json = {}
+
+            # Create or get user
+            user, created = User.objects.get_or_create(
+                email=email,
+                defaults={
+                    'name': name,
+                    'is_active': True,
+                    'password': make_password(None)
+                }
+            )
+
+            # Save profile image if new user
+            if created and profile_image_url:
+                img_response = requests.get(profile_image_url)
+                if img_response.status_code == 200:
+                    file_name = f"{slugify(name)}-profile.jpg"
+                    user.image.save(file_name, ContentFile(img_response.content), save=True)
+
+            # Check suspend flag
+            if getattr(user, 'block', False):
+                return Response(
+                    {"error": "User account is disabled. Please contact support"},
+                    status=403
+                )
+
+            # Generate JWT tokens
+            refresh = RefreshToken.for_user(user)
+            serializer = UserSerializer(user)
+
+            return Response({
+                'access': str(refresh.access_token),
+                'refresh': str(refresh),
+                'user': serializer.data,
+            })
+
+        except Exception as e:
+            return Response({'error': str(e)}, status=500)
