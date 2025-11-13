@@ -74,7 +74,7 @@ def get_stripe_client(company=None, use_env=False):
     except StripeCredential.DoesNotExist:
         raise Http404("Stripe credentials not found for this company.")
 
-def create_checkout_session(request, company_id, plan_id=None):
+def create_checkout_session(request, company_id, plan_id=None, method="web"):
     """Create Stripe Checkout session for subscription or one-time payment."""
     try:
         company = Company.objects.get(id=company_id)
@@ -128,13 +128,20 @@ def create_checkout_session(request, company_id, plan_id=None):
 
     stripe_client.api_key = api_key
 
+    if method == "app":
+        success_url = ""
+        cancel_url = ""
+    else:
+        success_url = ""
+        cancel_url = ""
+        
     # Create checkout session
     session = stripe_client.checkout.Session.create(
         payment_method_types=["card"],
         line_items=[{'price_data': price_data, 'quantity': 1}],
         mode='payment',
-        success_url=request.build_absolute_uri('/payment-success/'),
-        cancel_url=request.build_absolute_uri('/payment-cancel/'),
+        success_url= success_url,
+        cancel_url= cancel_url,
         metadata=metadata
     )
 
