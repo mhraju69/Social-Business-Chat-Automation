@@ -115,10 +115,10 @@ class DashboardView(APIView):
         payments_qs = Payment.objects.filter(
             company=company,
             payment_date__gte=start_utc,
-            payment_date__lt=end_utc
+            payment_date__lt=end_utc,
         )
 
-        total_amount = sum(payment.amount for payment in payments_qs)
+        total_amount = sum(payment.amount for payment in payments_qs.filter(status="success"))
 
         payment_list = []
         for payment in payments_qs:
@@ -127,6 +127,7 @@ class DashboardView(APIView):
                 "amount": float(payment.amount),
                 "type": payment.type,
                 "reason": payment.reason,
+                "status" : payment.status,
                 "payment_date": payment.payment_date.astimezone(company_tz).strftime("%Y-%m-%d %H:%M:%S")
             })
 
