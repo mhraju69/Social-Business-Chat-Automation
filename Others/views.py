@@ -676,3 +676,5 @@ class AnalyticsView(generics.GenericAPIView):
 
         return queryset
 
+class FinanceDataView(APIView):
+    pass

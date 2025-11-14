@@ -11,6 +11,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction
 from django.utils import timezone
 import stripe
+from rest_framework.decorators import api_view,permission_classes
 from Chat.consumers import send_alert
 from decimal import Decimal
 from django.http import Http404
@@ -74,18 +75,28 @@ def get_stripe_client(company=None, use_env=False):
     except StripeCredential.DoesNotExist:
         raise Http404("Stripe credentials not found for this company.")
 
-def create_checkout_session(request, company_id, plan_id=None, method="web"):
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def create_checkout_session(request,**kwargs):
     """Create Stripe Checkout session for subscription or one-time payment."""
     try:
+        type = request.data.get("type")
+        method = request.data.get("method")
+        email =request.data.get("email")
+        plan_id = request.data.get("plan_id")
+        company_id = request.data.get("company_id")
+        
         company = Company.objects.get(id=company_id)
-        cred = StripeCredential.objects.get(company=company)
+        
+        
     except (Company.DoesNotExist, StripeCredential.DoesNotExist):
         return HttpResponse("Company or Stripe credentials not found", status=404)
 
     # Determine if subscription
     is_subscription = bool(plan_id)
 
-    if is_subscription:
+    if type == 'subscriptions':
         try:
             plan = Plan.objects.get(id=plan_id)
         except Plan.DoesNotExist:
@@ -100,40 +111,45 @@ def create_checkout_session(request, company_id, plan_id=None, method="web"):
             'unit_amount': int(plan.price) * 100
         }
 
+        payment = Payment.objects.create(company=company,type="subscriptions",amount=str(plan.price),reason=f"Subscriptions for {plan.get_name_display()}",status="pending")
+
         metadata = {
-            'type': 'subscription',
-            'company_id': str(company.id),
-            'plan_id': str(plan.id),
-            'amount': str(plan.price)  # important for webhook
+            "payment_id" : payment.id
         }
 
-    else:
-        # One-time payment uses company credentials
-        stripe_client, api_key, webhook_secret = get_stripe_client(company=company)
-        amount = request.GET.get('amount', 5)
-        reason = request.GET.get('reason', 'One-time Payment')
+    elif type == 'services':
 
+        # One-time payment uses company credentials
+        cred = StripeCredential.objects.get(company=company)
+        stripe_client, api_key, webhook_secret = get_stripe_client(company=company)
+        amount = request.data.get('amount', 5)
+        reason = request.data.get('reason', 'One-time Payment')
+
+        if not email:
+             return HttpResponse("Email is required for service payments", status=404)
+        
         price_data = {
             'currency': 'usd',
             'product_data': {'name': reason},
             'unit_amount': int(float(amount) * 100)
         }
 
+        payment = Payment.objects.create(company=company,type="services",amount=amount,reason=reason,status="pending",client=email)
+
         metadata = {
-            'type': 'payment',
-            'company_id': str(company.id),
-            'reason': reason,
-            'amount': str(amount)
+            "payment_id" : payment.id
         }
+    else:
+        return Response("Invalid type", status=500)
 
     stripe_client.api_key = api_key
 
     if method == "app":
-        success_url = ""
-        cancel_url = ""
+        success_url = "https://www.youtube.com"
+        cancel_url = "https://www.facebook.com"
     else:
-        success_url = ""
-        cancel_url = ""
+        success_url = "https://www.facebook.com"
+        cancel_url = "https://www.youtube.com"
         
     # Create checkout session
     session = stripe_client.checkout.Session.create(
@@ -145,17 +161,10 @@ def create_checkout_session(request, company_id, plan_id=None, method="web"):
         metadata=metadata
     )
 
-    return redirect(session.url, code=303)
-
-def payment_success(request):
-    return HttpResponse("✅ Payment successful!")
-
-def payment_cancel(request):
-    return HttpResponse("❌ Payment cancelled.")
+    return Response({"redirect_url":session.url}, status=303)
 
 @csrf_exempt
 def stripe_webhook(request):
-    """Handle Stripe webhook for subscriptions and one-time payments."""
     payload = request.body
     sig_header = request.META.get('HTTP_STRIPE_SIGNATURE', '')
 
@@ -179,75 +188,62 @@ def stripe_webhook(request):
     data = event['data']['object']
     metadata = data.get('metadata', {})
 
-    company_id = metadata.get('company_id')
-    if not company_id:
-        print("⚠️ Missing company_id in metadata.")
-        return HttpResponse("Missing company_id", status=400)
-
-    try:
-        company = Company.objects.get(id=company_id)
-    except Company.DoesNotExist:
-        print(f"⚠️ Company {company_id} not found.")
-        return HttpResponse("Company not found", status=404)
-
-    # Amount handling
-    raw_amount = metadata.get('amount', None)
-    if raw_amount is not None:
+    # Fetch company if metadata has company_id
+    payment_id = None
+    payment = metadata.get('payment_id')
+    if payment:
         try:
-            amount = Decimal(raw_amount)
-        except Exception:
-            amount = Decimal('0')
-    else:
-        # Fallback: get amount from Stripe session (in cents)
-        amount_cents = data.get('amount_total') or data.get('amount')
-        if amount_cents:
-            amount = Decimal(amount_cents) / 100
-        else:
-            amount = Decimal('0')
+            payment = Payment.objects.get(id=payment)
+        except Payment.DoesNotExist:
+            return HttpResponse("Payment not found", status=404)
 
-    if event['type'] == 'checkout.session.completed':
-        meta_type = metadata.get('type', '')
+    # ----- Successful payment -----
+    if event['type'] == 'checkout.session.completed' and payment:
+            payment.status = "success"  
+            payment.payment_date = timezone.now()  
+            payment.transaction_id = data.get('id') 
+            payment.save()  # save the changes
+            
+            # Notify admins
+            if payment.type == "subscriptions":
+                for admin in User.objects.filter(is_staff=True):
 
-        if meta_type == 'subscription':
-            plan_id = metadata.get('plan_id')
-            plan = None
-            if plan_id:
-                try:
-                    plan = Plan.objects.get(id=plan_id)
-                except Plan.DoesNotExist:
-                    print(f"⚠️ Plan {plan_id} not found.")
-                    
-            # Record payment
-            Payment.objects.create(
-                company=company,
-                reason=f"Subscription: {plan.get_name_display() if plan else 'Unknown'}",
-                amount=amount,
-                type = 'subscriptions',
-                transaction_id=data['id'],
-                payment_date=timezone.now()
-            )
-            admins = User.objects.filter(is_staff=True) 
-            for admin in admins:
+                    send_alert(
+                        admin,
+                        "New payment received",
+                        f"{payment.amount} USD received for {payment.reason if payment else 'Unknown'} subscription plan from {getattr(payment.company.user, 'name', None) or payment.company.user.email}",
+                        "info"
+                    )
+            else:
                 send_alert(
-                    admin,
+                    payment.company.user,
                     "New payment received",
-                    f"{amount} USD received for {plan.get_name_display()} ({plan.get_duration_display()}) subscription plan from {getattr(company.user, 'name', None) or company.user.email}",
+                    f"{payment.amount} USD received for {payment.reason}",
                     "info"
                 )
 
+    # ----- Failed payment -----
+    elif event['type'] in ['payment_intent.payment_failed', 'charge.failed', 'checkout.session.async_payment_failed']:
 
-        elif meta_type == 'payment':
-            Payment.objects.create(
-                company=company,
-                reason=metadata.get('reason', 'Payment'),
-                amount=amount,
-                transaction_id=data['id'],
-                payment_date=timezone.now()
-            )
-            send_alert(company.user,"New payment recieved" , f"{amount}USD recieved for {metadata.get('reason', 'Payment')}","info")
-            print(f"✅ One-time payment recorded for {company.name}, amount: {amount}")
+        payment.status = "failed"  
+        payment.payment_date = timezone.now()  
+        payment.save()  
 
+        if payment.type == "subscriptions":
+                for admin in User.objects.filter(is_staff=True):
+                    send_alert(
+                        admin,
+                        "New payment received",
+                        f"{payment.amount} USD received for {payment.reason if payment else 'Unknown'} subscription plan from {getattr(payment.company.user, 'name', None) or payment.company.user.email}",
+                        "info"
+                    )
         else:
-            print(f"⚠️ Unknown metadata type: {meta_type}")
+            send_alert(
+                    payment.company.user,
+                    "New payment received",
+                    f"{payment.amount} USD received for {payment.reason}",
+                    "info"
+            )
+                
 
     return HttpResponse(status=200)

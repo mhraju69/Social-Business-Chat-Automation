@@ -41,21 +41,23 @@ class StripeCredential(models.Model):
     
 class Payment(models.Model):
     TYPE = [("subscriptions","Subscriptions"),("services","Services")]
+    STATUS = [("pending","Pending"),("success","Success"),("failed","Failed")]
     company = models.ForeignKey(
         Company,
         related_name='payments',  
         on_delete=models.CASCADE
     )
+    client = models.EmailField(max_length=100,blank=True,null=True)
     type = models.CharField(max_length=20,choices=TYPE,default="services")
     reason = models.CharField(max_length=255, verbose_name="Payment Reason",blank=True,null=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Payment Amount")
-    transaction_id = models.CharField(max_length=100, verbose_name="Transaction ID")
+    transaction_id = models.CharField(max_length=100, verbose_name="Transaction ID",blank=True,null=True)
     payment_date = models.DateTimeField(auto_now_add=True, verbose_name="Payment Date")
-
+    status = models.CharField(max_length=20,choices=STATUS,default="pending")
     history = HistoricalRecords()
 
     def __str__(self):
-        return f"Payment {self.transaction_id} by {self.company.name}"
+        return f"Payment by {self.company.user.email} for {self.type}"
     
     @classmethod
     def payments_today(cls, company, timezone_name=None):        
