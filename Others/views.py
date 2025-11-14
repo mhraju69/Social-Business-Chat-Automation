@@ -15,6 +15,10 @@ from .serializers import *
 from django.apps import apps
 from rest_framework.exceptions import PermissionDenied
 import requests
+from django.utils import timezone
+import pytz
+from datetime import timedelta
+from django.db.models import Sum
 
 def get_google_access_token(google_account):
     data = {
@@ -208,35 +212,6 @@ class DashboardView(APIView):
              "channel_status": chat_status
         })
     
-class AnalyticsView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-
-    def get(self, request, *args, **kwargs):
-        print("\n" + "="*80)
-        print("📊 [DEBUG] Analytics API called")
-        print(f"👤 [DEBUG] User: {request.user}")
-        print(f"🌐 [DEBUG] Query params: {request.query_params}")
-        print("="*80 + "\n")
-        
-        # Get timezone from query params
-        timezone_param = request.query_params.get('timezone', 'UTC')
-        
-        serializer = AnalyticsSerializer(
-            instance={},
-            context={
-                'request': request,
-                'timezone': timezone_param
-            }
-        )
-        
-        response_data = serializer.data
-        print("\n" + "="*80)
-        print("📤 [DEBUG] Analytics Response:")
-        print(response_data)
-        print("="*80 + "\n")
-        
-        return Response(response_data)
-
 class UserActivityLogView(APIView):
     permission_classes = [IsAuthenticated]
     
@@ -496,3 +471,208 @@ class GoogleConnectView(generics.CreateAPIView):
 
         msg = "Google account connected successfully" if created else "Google account updated successfully"
         return Response({"message": msg, "data": serializer.data}, status=status.HTTP_200_OK)
+    
+class AnalyticsView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        company = Company.objects.filter(user=request.user).first()
+
+        data = {
+            "message_count": self.get_message(request, company),
+            "booking_count": self.get_booking_count(request, company),
+            "total_revenue": self.get_total_revenue(request, company),
+            "new_customers": self.get_new_customers(company, request),
+            "unanswered_messages": self.get_unanswered_messages(company, request),
+            "channel_messages": self.channel_data(company, request),
+        }
+
+        return Response(data)
+
+    def get_message(self, request, company):
+        qs = ChatMessage.objects.filter(room__company=company)
+
+        time_filter = request.GET.get("time", "all")
+        channel = request.GET.get("channel", "all")
+        msg_type = request.GET.get("type", "all")
+        start_date = request.GET.get("start_date")
+        end_date = request.GET.get("end_date")
+        tz = request.GET.get("timezone", "UTC")
+
+        qs = self.filter_by_time(qs, time_filter, start_date, end_date, tz)
+        qs = self.filter_by_channel(qs, channel)
+        qs = self.filter_by_type(qs, msg_type)
+
+        return qs.count()
+
+    def get_booking_count(self, request, company):
+        qs = Booking.objects.filter(company=company)
+
+        time_filter = request.GET.get("time", "all")
+        tz = request.GET.get("timezone", "UTC")
+        start_date = request.GET.get("start_date")
+        end_date = request.GET.get("end_date")
+
+        qs = self.filter_by_time_generic(qs, time_filter, "start_time", start_date, end_date, tz)
+
+        return qs.count()
+
+    def get_total_revenue(self, request, company):
+        qs = Payment.objects.filter(company=company)
+
+        time_filter = request.GET.get("time", "all")
+        tz = request.GET.get("timezone", "UTC")
+        start_date = request.GET.get("start_date")
+        end_date = request.GET.get("end_date")
+
+        qs = self.filter_by_time_generic(qs, time_filter, "created_at", start_date, end_date, tz)
+
+        total = qs.aggregate(total=Sum("amount"))["total"]
+        return float(total) if total else 0.0
+
+    def get_new_customers(self, company, request):
+        rooms = ChatRoom.objects.filter(profile__user=company.user)
+
+        time_filter = request.GET.get("time", "all")
+        channel = request.GET.get("channel", "all")
+        tz = request.GET.get("timezone", "UTC")
+        start_date = request.GET.get("start_date")
+        end_date = request.GET.get("end_date")
+
+        rooms = self.filter_by_time_generic(
+            rooms, time_filter, "created_at", start_date, end_date, tz
+        )
+
+        rooms = self.filter_by_channel(rooms, channel)
+
+        return rooms.values("client").distinct().count()
+
+    def get_unanswered_messages(self, company, request):
+        rooms = ChatRoom.objects.filter(profile__user=company.user)
+
+        time_filter = request.GET.get("time", "all")
+        channel = request.GET.get("channel", "all")
+        tz = request.GET.get("timezone", "UTC")
+        start_date = request.GET.get("start_date")
+        end_date = request.GET.get("end_date")
+
+        rooms = self.filter_by_channel(rooms, channel)
+
+        count = 0
+
+        for room in rooms:
+            last_msg = ChatMessage.objects.filter(room=room).order_by("-timestamp").first()
+            if not last_msg:
+                continue
+
+            qs = ChatMessage.objects.filter(id=last_msg.id)
+            qs = self.filter_by_time(qs, time_filter, start_date, end_date, tz)
+
+            if not qs.exists():
+                continue
+
+            if last_msg.type == "incoming":
+                count += 1
+
+        return count
+
+    def channel_data(self, company, request):
+        time_filter = request.GET.get("time", "all")
+        start_date = request.GET.get("start_date")
+        end_date = request.GET.get("end_date")
+        tz = request.GET.get("tz", "UTC")
+
+        # Get all incoming messages of this company
+        qs = ChatMessage.objects.filter(
+            room__company=company,
+            type="incoming"
+        )
+
+        # Apply time filter
+        qs = self.filter_by_time(qs, time_filter, start_date, end_date, tz)
+
+        # Group by platform
+        platforms = qs.values("room__profile__platform").annotate(count=Count("id"))
+
+        # Build response dictionary
+        data = {}
+
+        for p in platforms:
+            platform_name = p["room__profile__platform"] or "unknown"
+            data[platform_name] = p["count"]
+
+        return data
+
+    @staticmethod
+    def filter_by_time(queryset, time_filter, start_date=None, end_date=None, tz="UTC"):
+        user_tz = pytz.timezone(tz)
+        now = timezone.now().astimezone(user_tz)
+
+        if time_filter == "today":
+            return queryset.filter(timestamp__date=now.date())
+
+        if time_filter == "this_week":
+            week_start = now - timedelta(days=now.weekday())
+            return queryset.filter(timestamp__date__gte=week_start.date())
+
+        if time_filter == "this_month":
+            return queryset.filter(
+                timestamp__year=now.year,
+                timestamp__month=now.month
+            )
+
+        if time_filter == "this_year":
+            return queryset.filter(timestamp__year=now.year)
+
+        if time_filter == "custom" and start_date and end_date:
+            return queryset.filter(timestamp__date__range=[start_date, end_date])
+
+        return queryset
+
+    @staticmethod
+    def filter_by_time_generic(queryset, time_filter, date_field, start_date=None, end_date=None, tz="UTC"):
+        user_tz = pytz.timezone(tz)
+        now = timezone.now().astimezone(user_tz)
+
+        if time_filter == "today":
+            return queryset.filter(**{f"{date_field}__date": now.date()})
+
+        if time_filter == "this_week":
+            week_start = now - timedelta(days=now.weekday())
+            return queryset.filter(**{f"{date_field}__date__gte": week_start.date()})
+
+        if time_filter == "this_month":
+            return queryset.filter(
+                **{
+                    f"{date_field}__year": now.year,
+                    f"{date_field}__month": now.month
+                }
+            )
+
+        if time_filter == "this_year":
+            return queryset.filter(**{f"{date_field}__year": now.year})
+
+        if time_filter == "custom" and start_date and end_date:
+            return queryset.filter(**{f"{date_field}__date__range": [start_date, end_date]})
+
+        return queryset
+
+    @staticmethod
+    def filter_by_channel(queryset, channel):
+        if channel == "all":
+            return queryset
+        return queryset.filter(room__profile__platform=channel)
+
+    @staticmethod
+    def filter_by_type(queryset, msg_type):
+        if msg_type == "all":
+            return queryset
+
+        if msg_type == "human":
+            return queryset.filter(type="outgoing", send_by_bot=False)
+
+        if msg_type == "ai":
+            return queryset.filter(type="outgoing", send_by_bot=True)
+
+        return queryset
+
