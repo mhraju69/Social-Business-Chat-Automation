@@ -52,6 +52,7 @@ class ChatRoom(models.Model):
     profile = models.ForeignKey(ChatProfile, related_name='rooms', on_delete=models.CASCADE)
     client = models.ForeignKey(ChatClient, related_name='rooms', on_delete=models.CASCADE)
     bot_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         verbose_name = "Chat Room"
@@ -74,6 +75,7 @@ class ChatMessage(models.Model):
     message_id = models.CharField(max_length=150, blank=True, null=True)
     timestamp = models.DateTimeField(auto_now_add=True)
     send_by_bot = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         verbose_name = "Chat Message"
@@ -81,3 +83,4 @@ class ChatMessage(models.Model):
 
     def __str__(self):
         return f"[{self.room.profile.platform}] {self.type} - {self.timestamp}"
+

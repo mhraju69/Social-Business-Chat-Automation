@@ -18,7 +18,7 @@ import requests
 from django.utils import timezone
 import pytz
 from datetime import timedelta
-from django.db.models import Sum
+from django.db.models import Sum,Count
 
 def get_google_access_token(google_account):
     data = {
@@ -477,7 +477,13 @@ class AnalyticsView(generics.GenericAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get(self, request):
-        company = Company.objects.filter(user=request.user).first()
+        try:
+            company = Company.objects.get(user=request.user)
+        except Company.DoesNotExist:
+            return Response(
+                {"error": "Company profile not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
 
         data = {
             "message_count": self.get_message(request, company),
@@ -491,7 +497,9 @@ class AnalyticsView(generics.GenericAPIView):
         return Response(data)
 
     def get_message(self, request, company):
-        qs = ChatMessage.objects.filter(room__company=company)
+        # ChatRoom এর মাধ্যমে messages filter করুন
+        rooms = ChatRoom.objects.filter(profile__user=company.user)
+        qs = ChatMessage.objects.filter(room__in=rooms)
 
         time_filter = request.GET.get("time", "all")
         channel = request.GET.get("channel", "all")
@@ -501,7 +509,11 @@ class AnalyticsView(generics.GenericAPIView):
         tz = request.GET.get("timezone", "UTC")
 
         qs = self.filter_by_time(qs, time_filter, start_date, end_date, tz)
-        qs = self.filter_by_channel(qs, channel)
+        
+        # Messages এর জন্য channel filter
+        if channel != "all":
+            qs = qs.filter(room__profile__platform=channel)
+            
         qs = self.filter_by_type(qs, msg_type)
 
         return qs.count()
@@ -532,7 +544,8 @@ class AnalyticsView(generics.GenericAPIView):
         return float(total) if total else 0.0
 
     def get_new_customers(self, company, request):
-        rooms = ChatRoom.objects.filter(profile__user=company.user)
+        user = company.user
+        rooms = ChatRoom.objects.filter(profile__user=user)
 
         time_filter = request.GET.get("time", "all")
         channel = request.GET.get("channel", "all")
@@ -544,12 +557,15 @@ class AnalyticsView(generics.GenericAPIView):
             rooms, time_filter, "created_at", start_date, end_date, tz
         )
 
-        rooms = self.filter_by_channel(rooms, channel)
+        # Rooms এর জন্য channel filter
+        if channel != "all":
+            rooms = rooms.filter(profile__platform=channel)
 
         return rooms.values("client").distinct().count()
 
     def get_unanswered_messages(self, company, request):
-        rooms = ChatRoom.objects.filter(profile__user=company.user)
+        user = company.user
+        rooms = ChatRoom.objects.filter(profile__user=user)
 
         time_filter = request.GET.get("time", "all")
         channel = request.GET.get("channel", "all")
@@ -557,7 +573,9 @@ class AnalyticsView(generics.GenericAPIView):
         start_date = request.GET.get("start_date")
         end_date = request.GET.get("end_date")
 
-        rooms = self.filter_by_channel(rooms, channel)
+        # Rooms এর জন্য channel filter
+        if channel != "all":
+            rooms = rooms.filter(profile__platform=channel)
 
         count = 0
 
@@ -578,32 +596,39 @@ class AnalyticsView(generics.GenericAPIView):
         return count
 
     def channel_data(self, company, request):
+        user = company.user
+        
         time_filter = request.GET.get("time", "all")
         start_date = request.GET.get("start_date")
         end_date = request.GET.get("end_date")
-        tz = request.GET.get("tz", "UTC")
+        tz = request.GET.get("timezone") or request.GET.get("tz") or "UTC"
 
-        # Get all incoming messages of this company
+        chat_profiles = ChatProfile.objects.filter(user=user)
+        rooms = ChatRoom.objects.filter(profile__in=chat_profiles)
+        
         qs = ChatMessage.objects.filter(
-            room__company=company,
+            room__in=rooms,
             type="incoming"
         )
 
-        # Apply time filter
         qs = self.filter_by_time(qs, time_filter, start_date, end_date, tz)
 
-        # Group by platform
         platforms = qs.values("room__profile__platform").annotate(count=Count("id"))
 
-        # Build response dictionary
-        data = {}
-
+        # সব platform এর জন্য 0 দিয়ে initialize করুন
+        result = {
+            "whatsapp": 0,
+            "facebook": 0,
+            "instagram": 0
+        }
+        
+        # যে platform এ message আছে সেগুলো update করুন
         for p in platforms:
-            platform_name = p["room__profile__platform"] or "unknown"
-            data[platform_name] = p["count"]
+            platform = p["room__profile__platform"]
+            result[platform] = p["count"]
 
-        return data
-
+        return result
+    
     @staticmethod
     def filter_by_time(queryset, time_filter, start_date=None, end_date=None, tz="UTC"):
         user_tz = pytz.timezone(tz)
@@ -659,12 +684,6 @@ class AnalyticsView(generics.GenericAPIView):
         return queryset
 
     @staticmethod
-    def filter_by_channel(queryset, channel):
-        if channel == "all":
-            return queryset
-        return queryset.filter(room__profile__platform=channel)
-
-    @staticmethod
     def filter_by_type(queryset, msg_type):
         if msg_type == "all":
             return queryset
@@ -676,6 +695,6 @@ class AnalyticsView(generics.GenericAPIView):
             return queryset.filter(type="outgoing", send_by_bot=True)
 
         return queryset
-
+    
 class FinanceDataView(APIView):
     pass
