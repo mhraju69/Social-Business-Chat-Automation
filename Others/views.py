@@ -1,16 +1,11 @@
-from django.urls import reverse
-from google_auth_oauthlib.flow import Flow
-from rest_framework.decorators import api_view
 from rest_framework.response import Response
 from rest_framework import status,permissions,generics
 from rest_framework.views import APIView 
+from rest_framework.viewsets import ModelViewSet 
 from rest_framework.permissions import IsAuthenticated
-from django.views.decorators.csrf import csrf_exempt
 from .models import *
 from Finance.models import *
 from django.conf import settings
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
 from .serializers import *
 from django.apps import apps
 from rest_framework.exceptions import PermissionDenied
@@ -717,3 +712,26 @@ class FinanceDataView(APIView):
         }
 
         return Response(data)
+    
+class SupportTicketViewSet(ModelViewSet):
+    serializer_class = SupportTicketSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    queryset = SupportTicket.objects.all()
+    def get_queryset(self):
+        user = self.request.user
+        
+        if user.is_staff:
+            return SupportTicket.objects.all()
+        return SupportTicket.objects.filter(user=user)
+
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if not request.user.is_staff and instance.user != request.user:
+            return Response(
+                {"error": "You don't have permission to edit this ticket."},
+                status=status.HTTP_403_FORBIDDEN
+            )
+        return super().update(request, *args, **kwargs)

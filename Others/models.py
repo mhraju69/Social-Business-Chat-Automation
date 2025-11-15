@@ -7,6 +7,7 @@ from django.utils import timezone
 from datetime import  timedelta
 import pytz
 from Finance.models import *
+import string
 
 class Booking(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='bookings', null=True, blank=True)
@@ -173,4 +174,35 @@ class KnowledgeBase(models.Model):
 
     def __str__(self):
         return self.name
+    
+class SupportTicket(models.Model):
+    STATUS_CHOICES = [
+        ('open', 'Open'),
+        ('in_progress', 'In Progress'),
+        ('resolved', 'Resolved'),
+        ('closed', 'Closed'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    subject = models.CharField(max_length=255,blank=True,null=True)
+    ticket_id = models.CharField(max_length=20)
+    description = models.TextField()
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='open')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.subject
+    
+    def generate_ticket_id(self):
+        while True:
+            ticket_id = ''.join(random.choice(string.ascii_uppercase + string.digits) for _ in range(random.randint(10,20)))
+            if not SupportTicket.objects.filter(ticket_id=ticket_id).exists():
+                return ticket_id
+
+    def save(self, *args, **kwargs):
+        if not self.ticket_id:
+            self.ticket_id = self.generate_ticket_id()
+        super().save(*args, **kwargs)
+
     
