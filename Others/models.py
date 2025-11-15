@@ -6,6 +6,7 @@ User = get_user_model()
 from django.utils import timezone
 from datetime import  timedelta
 import pytz
+from Finance.models import *
 
 class Booking(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='bookings', null=True, blank=True)
@@ -16,6 +17,7 @@ class Booking(models.Model):
     location = models.CharField(max_length=255,blank=True, null=True)
     price = models.CharField(max_length=100, blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
+    payment = models.OneToOneField(Payment, on_delete=models.SET_NULL, null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     google_event_id = models.CharField(max_length=255, blank=True, null=True)
     event_link = models.URLField(blank=True, null=True)

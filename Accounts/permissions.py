@@ -1,5 +1,5 @@
 # permissions_config.py
-from rest_framework import permissions
+from rest_framework.permissions import BasePermission
 
 PERMISSIONS_MATRIX = {
     'owner': {
@@ -69,19 +69,19 @@ PERMISSION_NAMES = {
     'api_management': 'API Management',
 }
 
-class IsOwner(permissions.BasePermission):
+class IsOwner(BasePermission):
     """Allow access only to owners."""
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated and request.user.is_owner)
 
 
-class IsEmployee(permissions.BasePermission):
+class IsEmployee(BasePermission):
     """Allow access only to employees."""
     def has_permission(self, request, view):
         return bool(request.user and request.user.is_authenticated and request.user.is_employee)
 
 
-class IsOwnerOrEmploye(permissions.BasePermission):
+class IsOwnerOrEmploye(BasePermission):
     """Allow access to admins or owners."""
     def has_permission(self, request, view):
         return bool(
@@ -89,3 +89,68 @@ class IsOwnerOrEmploye(permissions.BasePermission):
             and request.user.is_authenticated
             and (request.user.is_employee or request.user.is_owner)
         )
+
+class IsEmployeeAndCanViewDashboard(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        # Only check if the user is an employee
+        if hasattr(user, 'employee'):
+            return user.employee.can_view_dashboard()
+        # Non-employees have full access
+        return True
+
+
+class IsEmployeeAndCanManageUsers(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if hasattr(user, 'employee'):
+            return user.employee.can_manage_users()
+        return True
+
+
+class IsEmployeeAndCanAccessFinancialData(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if hasattr(user, 'employee'):
+            return user.employee.can_access_financial_data()
+        return True
+
+
+class IsEmployeeAndCanAccessCustomerSupport(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if hasattr(user, 'employee'):
+            return user.employee.can_access_customer_support()
+        return True
+
+
+class IsEmployeeAndCanAccessBillingInvoices(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if hasattr(user, 'employee'):
+            return user.employee.can_access_billing_invoices()
+        return True
+
+
+class IsEmployeeAndCanAccessAnalyticsReports(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if hasattr(user, 'employee'):
+            return user.employee.can_access_analytics_reports()
+        return True
+
+
+class IsEmployeeAndCanAccessSystemSettings(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if hasattr(user, 'employee'):
+            return user.employee.can_access_system_settings()
+        return True
+
+
+class IsEmployeeAndCanManageAPI(BasePermission):
+    def has_permission(self, request, view):
+        user = request.user
+        if hasattr(user, 'employee'):
+            return user.employee.can_manage_api()
+        return True

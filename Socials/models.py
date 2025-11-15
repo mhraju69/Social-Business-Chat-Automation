@@ -36,7 +36,7 @@ class ChatProfile(models.Model):
 
 class ChatClient(models.Model):
     platform = models.CharField(max_length=20, choices=ChatProfile.PLATFORM_CHOICES)
-    client_id = models.CharField(max_length=150, unique=True)  # number, user_id, etc.
+    client_id = models.CharField(max_length=150, unique=True)  
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

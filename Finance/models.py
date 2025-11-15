@@ -4,7 +4,7 @@ from django.utils import timezone
 from datetime import  timedelta
 import pytz 
 from simple_history.models import HistoricalRecords
-
+from django.db.models import Sum
 # Create your models here.
 class Plan(models.Model):
     PLAN = [("basic", "Basic"),("business", "Business"),("premium", "Premium"),]
@@ -55,6 +55,7 @@ class Payment(models.Model):
     payment_date = models.DateTimeField(auto_now_add=True, verbose_name="Payment Date")
     status = models.CharField(max_length=20,choices=STATUS,default="pending")
     created_at = models.DateTimeField(auto_now_add=True)
+    url = models.URLField(null=True,blank=True)
     history = HistoricalRecords()
 
     def __str__(self):
@@ -93,3 +94,74 @@ class Payment(models.Model):
         
         return qs
  
+    @classmethod
+    def success_payment_change_percentage(cls, company):
+        """
+        Compare total successful payments of the current month and last month
+        and return the percentage change.
+        """
+        now = timezone.now()
+        
+        # Current month range
+        current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        current_month_end = (current_month_start + timedelta(days=32)).replace(day=1)  # start of next month
+        
+        # Last month range
+        last_month_end = current_month_start
+        last_month_start = (current_month_start - timedelta(days=1)).replace(day=1)
+        
+        # Sum successful payments
+        current_total = cls.objects.filter(
+            company=company,
+            status='success',
+            payment_date__gte=current_month_start,
+            payment_date__lt=current_month_end
+        ).aggregate(total=Sum('amount'))['total'] or 0
+        
+        last_total = cls.objects.filter(
+            company=company,
+            status='success',
+            payment_date__gte=last_month_start,
+            payment_date__lt=last_month_end
+        ).aggregate(total=Sum('amount'))['total'] or 0
+        
+        # Calculate percentage change
+        if last_total == 0:
+            if current_total == 0:
+                return 0  # no change
+            return 100  # new revenue this month
+        change = ((current_total - last_total) / last_total) * 100
+        return round(change, 2)
+    
+    def get_failed_payment_counts(company):
+        today = timezone.now()
+
+        # Current month range
+        current_month_start = today.replace(day=1)
+        next_month = (current_month_start + timedelta(days=32)).replace(day=1)
+
+        # Last month range
+        last_month_end = current_month_start
+        last_month_start = (current_month_start - timedelta(days=1)).replace(day=1)
+
+        # Query failed payments for each period
+        current_month_failed = Payment.objects.filter(
+            company=company,
+            status="failed",
+            payment_date__gte=current_month_start,
+            payment_date__lt=next_month
+        ).count()
+
+        last_month_failed = Payment.objects.filter(
+            company_id=company,
+            status="failed",
+            payment_date__gte=last_month_start,
+            payment_date__lt=last_month_end
+        ).count()
+
+        return {
+            "current_month_failed": current_month_failed,
+            "last_month_failed": last_month_failed
+        }
+    
+    

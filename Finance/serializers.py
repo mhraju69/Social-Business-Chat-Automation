@@ -37,13 +37,7 @@ class StripeSerializer(serializers.ModelSerializer):
 class PaymentSerializer(serializers.ModelSerializer):
     class Meta:
         model = Payment
-        fields = [
-            'id',
-            'reason',
-            'amount',
-            'transaction_id',
-            'payment_date',
-        ]
+        fields = '__all__'
 
 class PlanValueSerializers(serializers.ModelSerializer):
     class Meta:

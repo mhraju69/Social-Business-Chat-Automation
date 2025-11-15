@@ -14,7 +14,7 @@ import stripe
 from rest_framework.decorators import api_view,permission_classes
 from Chat.consumers import send_alert
 from decimal import Decimal
-from django.http import Http404
+from .helper import *
 # Create your views here.
 
 class StripeListCreateView(generics.ListCreateAPIView):
@@ -60,109 +60,26 @@ class GetPlans(APIView):
         serializer = self.serializer_class(plans, many=True)  
         return Response(serializer.data)
     
-def get_stripe_client(company=None, use_env=False):
-    """Return Stripe client configuration."""
-    if use_env:
-        # Use global environment Stripe credentials
-        return stripe, settings.STRIPE_SECRET_KEY, settings.STRIPE_WEBHOOK_SECRET
-
-    if not company:
-        raise ValueError("Company is required for company-based Stripe credentials")
-
-    try:
-        cred = StripeCredential.objects.get(company=company)
-        return stripe, cred.api_key, cred.webhook_secret
-    except StripeCredential.DoesNotExist:
-        raise Http404("Stripe credentials not found for this company.")
-
 @csrf_exempt
-@api_view(["GET"])
+@api_view(["POST"])
 @permission_classes([AllowAny])
-def create_checkout_session(request,**kwargs):
-    """Create Stripe Checkout session for subscription or one-time payment."""
+def create_checkout_session(request):
     try:
-        type = request.data.get("type")
-        method = request.data.get("method")
-        email =request.data.get("email")
-        plan_id = request.data.get("plan_id")
-        company_id = request.data.get("company_id")
-        
-        company = Company.objects.get(id=company_id)
-        
-        
-    except (Company.DoesNotExist, StripeCredential.DoesNotExist):
-        return HttpResponse("Company or Stripe credentials not found", status=404)
-
-    # Determine if subscription
-    is_subscription = bool(plan_id)
-
-    if type == 'subscriptions':
-        try:
-            plan = Plan.objects.get(id=plan_id)
-        except Plan.DoesNotExist:
-            return HttpResponse("Plan not found", status=404)
-
-        # Subscription uses ENV credentials
-        stripe_client, api_key, webhook_secret = get_stripe_client(use_env=True)
-
-        price_data = {
-            'currency': 'usd',
-            'product_data': {'name': f"{plan.get_name_display()} ({plan.get_duration_display()})"},
-            'unit_amount': int(plan.price) * 100
-        }
-
-        payment = Payment.objects.create(company=company,type="subscriptions",amount=str(plan.price),reason=f"Subscriptions for {plan.get_name_display()}",status="pending")
-
-        metadata = {
-            "payment_id" : payment.id
-        }
-
-    elif type == 'services':
-
-        # One-time payment uses company credentials
-        cred = StripeCredential.objects.get(company=company)
-        stripe_client, api_key, webhook_secret = get_stripe_client(company=company)
-        amount = request.data.get('amount', 5)
-        reason = request.data.get('reason', 'One-time Payment')
-
-        if not email:
-             return HttpResponse("Email is required for service payments", status=404)
-        
-        price_data = {
-            'currency': 'usd',
-            'product_data': {'name': reason},
-            'unit_amount': int(float(amount) * 100)
-        }
-
-        payment = Payment.objects.create(company=company,type="services",amount=amount,reason=reason,status="pending",client=email)
-
-        metadata = {
-            "payment_id" : payment.id
-        }
-    else:
-        return Response("Invalid type", status=500)
-
-    stripe_client.api_key = api_key
-
-    if method == "app":
-        success_url = "https://www.youtube.com"
-        cancel_url = "https://www.facebook.com"
-    else:
-        success_url = "https://www.facebook.com"
-        cancel_url = "https://www.youtube.com"
-        
-    # Create checkout session
-    session = stripe_client.checkout.Session.create(
-        payment_method_types=["card"],
-        line_items=[{'price_data': price_data, 'quantity': 1}],
-        mode='payment',
-        success_url= success_url,
-        cancel_url= cancel_url,
-        metadata=metadata
-    )
-
-    return Response({"redirect_url":session.url}, status=303)
-
+        payment = create_stripe_checkout(
+            type=request.data.get("type"),
+            company_id=request.data.get("company_id"),
+            email=request.data.get("email"),
+            plan_id=request.data.get("plan_id"),
+            amount=request.data.get("amount"),
+            reason=request.data.get("reason"),
+            method=request.data.get("method", "web")
+        )
+        return Response({"redirect_url": payment.url}, status=303)
+    except ValueError as e:
+        return Response({"error": str(e)}, status=400)
+    except StripeCredential.DoesNotExist:
+        return Response({"error": "Stripe credentials not found"}, status=404)
+    
 @csrf_exempt
 def stripe_webhook(request):
     payload = request.body
@@ -247,3 +164,16 @@ def stripe_webhook(request):
                 
 
     return HttpResponse(status=200)
+
+@csrf_exempt
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def get_payment(request,payment_id):
+    try:
+        payment =Payment.objects.get(id=payment_id)
+        return Response(PaymentSerializer(payment).data, status=200)
+    except ValueError as e:
+        return Response({"error": str(e)}, status=400)
+    except Payment.DoesNotExist:
+        return Response({"error": "Payment not found"}, status=404)
+ 

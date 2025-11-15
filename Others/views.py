@@ -19,11 +19,12 @@ from django.utils import timezone
 import pytz
 from datetime import timedelta
 from django.db.models import Sum,Count
+from Accounts.permissions import *
 
 def get_google_access_token(google_account):
     data = {
-        "client_id": google_account.client_id or settings.GOOGLE_CLIENT_ID,
-        "client_secret": google_account.client_secret or settings.GOOGLE_CLIENT_SECRET,
+        "client_id": settings.GOOGLE_CLIENT_ID,
+        "client_secret": settings.GOOGLE_CLIENT_SECRET,
         "refresh_token": google_account.refresh_token,
         "grant_type": "refresh_token",
     }
@@ -37,45 +38,45 @@ class ClientBookingView(APIView):
         if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not hasattr(company, 'google_account'):
-            return Response({"error": "Company has not connected Google Calendar"}, status=400)
+        # if not hasattr(company, 'google_account'):
+        #     return Response({"error": "Company has not connected Google Calendar"}, status=400)
 
         serializer = BookingSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
         booking = serializer.save(company=company)
 
-        # create event in Google Calendar
-        google_account = company.google_account
-        access_token = get_google_access_token(google_account)
-        if not access_token:
-            return Response({"error": "Unable to get access token"}, status=400)
+        # # create event in Google Calendar
+        # google_account = company.google_account
+        # access_token = get_google_access_token(google_account)
+        # if not access_token:
+        #     return Response({"error": "Unable to get access token"}, status=400)
 
-        event_data = {
-            "summary": booking.title,
-            "description": booking.notes or "",
-            "start": {"dateTime": booking.start_time.isoformat(), "timeZone": company.timezone},
-            "end": {"dateTime": booking.end_time.isoformat() if booking.end_time else booking.start_time.isoformat(), 
-                    "timeZone": company.timezone},
-            "location": booking.location or "",
-            "attendees": [{"email": booking.client}] if booking.client else [],
-        }
+        # event_data = {
+        #     "summary": booking.title,
+        #     "description": booking.notes or "",
+        #     "start": {"dateTime": booking.start_time.isoformat(), "timeZone": company.timezone},
+        #     "end": {"dateTime": booking.end_time.isoformat() if booking.end_time else booking.start_time.isoformat(), 
+        #             "timeZone": company.timezone},
+        #     "location": booking.location or "",
+        #     "attendees": [{"email": booking.client}] if booking.client else [],
+        # }
 
-        headers = {"Authorization": f"Bearer {access_token}"}
-        response = requests.post(
-            "https://www.googleapis.com/calendar/v3/calendars/primary/events",
-            headers=headers,
-            json=event_data
-        )
+        # headers = {"Authorization": f"Bearer {access_token}"}
+        # response = requests.post(
+        #     "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+        #     headers=headers,
+        #     json=event_data
+        # )
 
-        if response.status_code in [200, 201]:
-            event = response.json()
-            booking.google_event_id = event.get("id")
-            booking.event_link = event.get("htmlLink")
-            booking.save()
-        else:
-            return Response({"error": "Failed to create Google Calendar event", "details": response.json()},
-                            status=response.status_code)
+        # if response.status_code in [200, 201]:
+        #     event = response.json()
+        #     booking.google_event_id = event.get("id")
+        #     booking.event_link = event.get("htmlLink")
+        #     booking.save()
+        # else:
+        #     return Response({"error": "Failed to create Google Calendar event", "details": response.json()},
+        #                     status=response.status_code)
 
         return Response(BookingSerializer(booking).data, status=status.HTTP_201_CREATED)
     
@@ -697,7 +698,7 @@ class AnalyticsView(generics.GenericAPIView):
         return queryset
     
 class FinanceDataView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated,IsEmployeeAndCanAccessFinancialData]
     
     def get(self, request):
         try:
@@ -710,46 +711,22 @@ class FinanceDataView(APIView):
         
         data = {
             "total_revenue": self.get_total_revenue(request, company),
+            "revenue_change": Payment.success_payment_change_percentage(company),
+            "failed_payment" : Payment.get_failed_payment_counts(company)
+
         }
 
         return Response(data)
 
     def get_total_revenue(self, request, company):
-        print("\n" + "=" * 50)
-        print("DEBUG: get_total_revenue")
-        print(f"Company: {company}")
-        print(f"Timezone: {request.GET.get('timezone', 'UTC')}")
         
-        # All payments
-        all_payments = Payment.objects.filter(company=company)
-        print(f"Total payments for company: {all_payments.count()}")
-        
-        # Success payments only
         qs = Payment.objects.filter(company=company, status="success")
-        print(f"Success payments: {qs.count()}")
-        
-        if qs.exists():
-            print("Sample payment data:")
-            for p in qs[:3]:
-                print(f"  - ID: {p.id}, Amount: {p.amount}, Created: {p.created_at}, Status: {p.status}")
         
         tz = request.GET.get("timezone", "UTC")
-        print(f"Applying time filter: this_month, timezone: {tz}")
         
-        # Apply time filter
         qs = AnalyticsView.filter_by_time_generic(qs, "this_month", "created_at", None, None, tz)
-        print(f"After time filter: {qs.count()} payments")
-        
-        if qs.exists():
-            print("Filtered payment data:")
-            for p in qs[:3]:
-                print(f"  - ID: {p.id}, Amount: {p.amount}, Created: {p.created_at}")
-        
-        # Calculate total
+
         total = qs.aggregate(total=Sum("amount"))["total"]
-        print(f"Total amount: {total}")
-        print("=" * 50 + "\n")
         
         return float(total) if total else 0.0
 
-        
