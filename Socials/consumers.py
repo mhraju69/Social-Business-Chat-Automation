@@ -235,7 +235,7 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
     def send_outgoing_message(self, user, platform, client_id, message_text):
         """Frontend থেকে message পাঠানো (webhook এর send_message call করবে)"""
         try:
-            from .views import send_message  # Your existing function
+            from ..Chat.views import send_message  # Your existing function
             
             profile = ChatProfile.objects.get(
                 user=user, platform=platform, bot_active=True

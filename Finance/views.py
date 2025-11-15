@@ -12,7 +12,7 @@ from django.db import transaction
 from django.utils import timezone
 import stripe
 from rest_framework.decorators import api_view,permission_classes
-from Chat.consumers import send_alert
+from Socials.consumers import send_alert
 from decimal import Decimal
 from .helper import *
 # Create your views here.

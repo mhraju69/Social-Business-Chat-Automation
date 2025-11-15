@@ -59,7 +59,6 @@ INSTALLED_APPS = [
     'rest_framework',
     'channels',
     'Accounts',
-    'Chat',
     'Others',
     'simple_history',
     'Socials',
