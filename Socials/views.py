@@ -13,7 +13,9 @@ User = get_user_model()
 from rest_framework.decorators import api_view,permission_classes
 from .serializers import *
 from rest_framework.exceptions import NotFound
-
+from django.db.models import Count
+from django.db.models.functions import Lower
+from Accounts.models import *
 # Create your views here.
 
 def Connect(request):
@@ -239,3 +241,19 @@ class ChatProfileView(RetrieveUpdateAPIView):
             return ChatProfile.objects.get(user=self.request.user, platform=platform)
         except ChatProfile.DoesNotExist:
             raise NotFound(detail=f"ChatProfile with platform '{platform}' not found.")
+        
+class CommonAskedLeaderboard(APIView):
+    def get(self, request):
+        company = Company.objects.filter(user=request.user).first()
+
+        if not company:
+            return Response({"error": "Company not found"}, status=404)
+
+        data = ChatMessage.objects.filter(
+            room__profile__user=request.user,
+            type='incoming'
+        ).values('text').annotate(
+            count=Count('id')
+        ).order_by('-count')[:10]  # top 20 questions
+
+        return Response(data)
