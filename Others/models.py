@@ -112,6 +112,7 @@ class ChatBot(models.Model):
     language = models.CharField(max_length=50,default='English', verbose_name="Bot Language")
     description = models.TextField(blank=True, null=True, verbose_name="Bot Description")
     is_active = models.BooleanField(default=False, verbose_name="Is Bot Active")
+    formality_level = models.PositiveIntegerField(default=5)  # 1–10 scale
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -158,7 +159,7 @@ class Alert(models.Model):
     def __str__(self):
         return f"{self.user.email} - {self.title}"
 
-class KnowledgeBase(models.Model):
+class KnowledgeBase(models.Model):  
     user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='knowledge_base',  on_delete=models.CASCADE,)
     name = models.CharField(max_length=255,null=True, blank=True)
     details = models.TextField(null=True, blank=True)
@@ -172,3 +173,4 @@ class KnowledgeBase(models.Model):
 
     def __str__(self):
         return self.name
+    

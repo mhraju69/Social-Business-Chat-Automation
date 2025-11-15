@@ -89,10 +89,6 @@ class Company(models.Model):
 
     system_language = models.CharField(max_length=50, default='English')
 
-    # Tone & Personality
-    formality_level = models.PositiveIntegerField(default=5)  # 1–10 scale
-
-    timezone = models.CharField(max_length=100, default='UTC')
     # AI training
     training_files = models.FileField(upload_to='ai_training/', blank=True, null=True)
 

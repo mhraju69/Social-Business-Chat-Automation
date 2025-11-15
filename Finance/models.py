@@ -5,7 +5,10 @@ from datetime import  timedelta
 import pytz 
 from simple_history.models import HistoricalRecords
 from django.db.models import Sum
+from django.utils.timezone import now
+from django.db.models import Avg
 # Create your models here.
+
 class Plan(models.Model):
     PLAN = [("basic", "Basic"),("business", "Business"),("premium", "Premium"),]
     DURATION = [("monthly", "Monthly"),("yearly", "Yearly")]
@@ -61,7 +64,6 @@ class Payment(models.Model):
     def __str__(self):
         return f"Payment by {self.company.user.email} for {self.type}"
     
-    @classmethod
     def payments_today(cls, company, timezone_name=None):        
         # Use provided timezone or fall back to company timezone
         tz_name = timezone_name or getattr(company, 'timezone', 'UTC')
@@ -94,12 +96,8 @@ class Payment(models.Model):
         
         return qs
  
-    @classmethod
-    def success_payment_change_percentage(cls, company):
-        """
-        Compare total successful payments of the current month and last month
-        and return the percentage change.
-        """
+    def success_payment_change_percentage(company):
+
         now = timezone.now()
         
         # Current month range
@@ -111,14 +109,14 @@ class Payment(models.Model):
         last_month_start = (current_month_start - timedelta(days=1)).replace(day=1)
         
         # Sum successful payments
-        current_total = cls.objects.filter(
+        current_total = Payment.objects.filter(
             company=company,
             status='success',
             payment_date__gte=current_month_start,
             payment_date__lt=current_month_end
         ).aggregate(total=Sum('amount'))['total'] or 0
         
-        last_total = cls.objects.filter(
+        last_total = Payment.objects.filter(
             company=company,
             status='success',
             payment_date__gte=last_month_start,
@@ -127,11 +125,14 @@ class Payment(models.Model):
         
         # Calculate percentage change
         if last_total == 0:
-            if current_total == 0:
-                return 0  # no change
-            return 100  # new revenue this month
-        change = ((current_total - last_total) / last_total) * 100
-        return round(change, 2)
+            percent_change = 100 if current_total > 0 else 0
+        else:
+            percent_change = ((current_total - last_total) / last_total) * 100
+
+        return {
+            "current_month": current_total,
+            "difference": round(percent_change, 2)
+        }
     
     def get_failed_payment_counts(company):
         today = timezone.now()
@@ -160,8 +161,85 @@ class Payment(models.Model):
         ).count()
 
         return {
-            "current_month_failed": current_month_failed,
-            "last_month_failed": last_month_failed
+            "current_month": current_month_failed,
+            "last_month": last_month_failed
         }
     
+    def pending_payment_stats(company):
+        today = now()
+        first_day_current_month = today.replace(day=1)
+        
+        # Last month calculation
+        if first_day_current_month.month == 1:
+            first_day_last_month = first_day_current_month.replace(year=today.year-1, month=12)
+        else:
+            first_day_last_month = first_day_current_month.replace(month=today.month-1)
+        
+        # Last day of last month
+        last_day_last_month = first_day_current_month - timedelta(seconds=1)
+
+        # Total pending payments for last month (services only)
+        last_month_total = Payment.objects.filter(
+            company=company,
+            type="services",
+            status="pending",
+            payment_date__gte=first_day_last_month,
+            payment_date__lte=last_day_last_month
+        ).aggregate(total=Sum('amount'))['total'] or 0
+
+        # Total pending payments for current month (services only)
+        current_month_total = Payment.objects.filter(
+            company=company,
+            type="services",
+            status="pending",
+            payment_date__gte=first_day_current_month,
+            payment_date__lte=today
+        ).aggregate(total=Sum('amount'))['total'] or 0
+
+        # Percentage difference calculation
+        if last_month_total == 0:
+            percent_diff = 100 if current_month_total > 0 else 0
+        else:
+            percent_diff = ((current_month_total - last_month_total) / last_month_total) * 100
+
+        return {
+            "current_month": current_month_total,
+            "difference": percent_diff
+        }
     
+    def average_order_value_change(company):
+        now = timezone.now()
+        
+        # Current month range
+        current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        current_month_end = (current_month_start + timedelta(days=32)).replace(day=1)  # start of next month
+        
+        # Last month range
+        last_month_end = current_month_start
+        last_month_start = (current_month_start - timedelta(days=1)).replace(day=1)
+        
+        # Calculate average successful payments
+        current_avg = Payment.objects.filter(
+            company=company,
+            status='success',
+            payment_date__gte=current_month_start,
+            payment_date__lt=current_month_end
+        ).aggregate(avg=Avg('amount'))['avg'] or 0
+
+        last_avg = Payment.objects.filter(
+            company=company,
+            status='success',
+            payment_date__gte=last_month_start,
+            payment_date__lt=last_month_end
+        ).aggregate(avg=Avg('amount'))['avg'] or 0
+        
+        # Calculate percentage change
+        if last_avg == 0:
+            percent_change = 100 if current_avg > 0 else 0
+        else:
+            percent_change = ((current_avg - last_avg) / last_avg) * 100
+
+        return {
+            "current_month": round(current_avg, 2),
+            "difference": round(percent_change, 2)
+        }
