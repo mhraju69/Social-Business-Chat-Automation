@@ -107,11 +107,7 @@ class GoogleAccount(models.Model):
         return f"{self.company.name} - Google Connected"
     
 class ChatBot(models.Model):
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL, 
-        related_name='chat_bots',  
-        on_delete=models.CASCADE
-    )
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, related_name='chat_bots',  on_delete=models.CASCADE)
     name = models.CharField(max_length=100, verbose_name="Bot Name")
     language = models.CharField(max_length=50,default='English', verbose_name="Bot Language")
     description = models.TextField(blank=True, null=True, verbose_name="Bot Description")
@@ -163,8 +159,14 @@ class Alert(models.Model):
         return f"{self.user.email} - {self.title}"
 
 class KnowledgeBase(models.Model):
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL, 
+        related_name='chat_bots',  
+        on_delete=models.CASCADE
+    )
     name = models.CharField(max_length=255)
     details = models.TextField()
+    file = models.FileField(upload_to='knowledge_files/', null=True, blank=True)  # fixed
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

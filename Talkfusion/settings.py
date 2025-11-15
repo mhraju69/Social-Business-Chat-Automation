@@ -193,3 +193,6 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=30)
 }
 
+# Allow large file uploads
+DATA_UPLOAD_MAX_MEMORY_SIZE = None  # default is 2.5MB
+FILE_UPLOAD_MAX_MEMORY_SIZE = None  # use disk for large files
