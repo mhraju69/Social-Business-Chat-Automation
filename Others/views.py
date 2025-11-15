@@ -697,4 +697,59 @@ class AnalyticsView(generics.GenericAPIView):
         return queryset
     
 class FinanceDataView(APIView):
-    pass
+    permission_classes = [IsAuthenticated]
+    
+    def get(self, request):
+        try:
+            company = Company.objects.get(user=request.user)
+        except Company.DoesNotExist:
+            return Response(
+                {"error": "Company profile not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        data = {
+            "total_revenue": self.get_total_revenue(request, company),
+        }
+
+        return Response(data)
+
+    def get_total_revenue(self, request, company):
+        print("\n" + "=" * 50)
+        print("DEBUG: get_total_revenue")
+        print(f"Company: {company}")
+        print(f"Timezone: {request.GET.get('timezone', 'UTC')}")
+        
+        # All payments
+        all_payments = Payment.objects.filter(company=company)
+        print(f"Total payments for company: {all_payments.count()}")
+        
+        # Success payments only
+        qs = Payment.objects.filter(company=company, status="success")
+        print(f"Success payments: {qs.count()}")
+        
+        if qs.exists():
+            print("Sample payment data:")
+            for p in qs[:3]:
+                print(f"  - ID: {p.id}, Amount: {p.amount}, Created: {p.created_at}, Status: {p.status}")
+        
+        tz = request.GET.get("timezone", "UTC")
+        print(f"Applying time filter: this_month, timezone: {tz}")
+        
+        # Apply time filter
+        qs = AnalyticsView.filter_by_time_generic(qs, "this_month", "created_at", None, None, tz)
+        print(f"After time filter: {qs.count()} payments")
+        
+        if qs.exists():
+            print("Filtered payment data:")
+            for p in qs[:3]:
+                print(f"  - ID: {p.id}, Amount: {p.amount}, Created: {p.created_at}")
+        
+        # Calculate total
+        total = qs.aggregate(total=Sum("amount"))["total"]
+        print(f"Total amount: {total}")
+        print("=" * 50 + "\n")
+        
+        return float(total) if total else 0.0
+
+        
