@@ -13,6 +13,7 @@ urlpatterns = [
     path('api/', include('Others.urls')),
     path('api/auth/', include('Accounts.urls')),
     path('api/finance/', include('Finance.urls')),
+    path('api/chat/', include('Socials.urls')),
     path('connect/', Connect),
     path("webhook/<str:platform>/", unified_webhook, name="unified_webhook"),
     path('facebook/callback/', facebook_callback),  

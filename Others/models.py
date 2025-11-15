@@ -159,14 +159,10 @@ class Alert(models.Model):
         return f"{self.user.email} - {self.title}"
 
 class KnowledgeBase(models.Model):
-    user = models.OneToOneField(
-        settings.AUTH_USER_MODEL, 
-        related_name='chat_bots',  
-        on_delete=models.CASCADE
-    )
-    name = models.CharField(max_length=255)
-    details = models.TextField()
-    file = models.FileField(upload_to='knowledge_files/', null=True, blank=True)  # fixed
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='knowledge_base',  on_delete=models.CASCADE,)
+    name = models.CharField(max_length=255,null=True, blank=True)
+    details = models.TextField(null=True, blank=True)
+    file = models.FileField(upload_to='knowledge_files/', null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

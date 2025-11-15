@@ -5,11 +5,14 @@ from django.conf import settings
 from .models import *
 from django.contrib.auth import get_user_model
 from django.shortcuts import redirect
+from rest_framework.generics import *
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.permissions import AllowAny,IsAuthenticated
 User = get_user_model()
 from rest_framework.decorators import api_view,permission_classes
+from .serializers import *
+from rest_framework.exceptions import NotFound
 
 # Create your views here.
 
@@ -223,3 +226,16 @@ def instagram_callback(request):
         "pages": debug_pages
     })
 
+
+class ChatProfileView(RetrieveUpdateAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = ChatProfileSerializers
+
+    def get_object(self):
+        # Use query_params for GET requests, fallback to data for PUT/PATCH
+        platform = self.request.query_params.get("platform") or self.request.data.get("platform") or "facebook"
+        
+        try:
+            return ChatProfile.objects.get(user=self.request.user, platform=platform)
+        except ChatProfile.DoesNotExist:
+            raise NotFound(detail=f"ChatProfile with platform '{platform}' not found.")
