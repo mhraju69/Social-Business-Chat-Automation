@@ -124,7 +124,7 @@ class ServiceRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
         return Service.objects.filter(company=self.request.user.company)
     
 class AddEmployeeView(APIView):
-    permission_classes = [permissions.IsAuthenticated,IsOwner]
+    permission_classes = [permissions.IsAuthenticated,IsOwner,IsEmployeeAndCanManageUsers]
 
     def get(self, request):
         owner = request.user.email

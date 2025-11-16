@@ -15,6 +15,7 @@ import pytz
 from datetime import timedelta
 from django.db.models import Sum,Count
 from Accounts.permissions import *
+from .helper import *
 
 def get_google_access_token(google_account):
     data = {
@@ -30,6 +31,7 @@ def get_google_access_token(google_account):
 class ClientBookingView(APIView):
     def post(self, request, company_id):
         company = Company.objects.filter(id=company_id).first()
+        number = request.data.get('number')
         if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
 
@@ -69,14 +71,21 @@ class ClientBookingView(APIView):
             booking.google_event_id = event.get("id")
             booking.event_link = event.get("htmlLink")
             booking.save()
-        else:
-            return Response({"error": "Failed to create Google Calendar event", "details": response.json()},
-                            status=response.status_code)
+        if number: 
+            text_message = (
+                    f"Booking Confirmed\n"
+                    f"Title: {booking.title}\n"
+                    f"Time: {booking.start_time}\n"
+                    f"Location: {booking.location or 'N/A'}\n"
+                    f"Event Link: {booking.event_link or 'N/A'}"
+                )
+
+            send_via_webhook_style(number, text_message)
 
         return Response(BookingSerializer(booking).data, status=status.HTTP_201_CREATED)
     
 class DashboardView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated,IsEmployeeAndCanViewDashboard]
 
     # --- Chat related function ---
     def get_open_chats_count(self, user, minutes=10):
@@ -470,7 +479,7 @@ class GoogleConnectView(generics.CreateAPIView):
         return Response({"message": msg, "data": serializer.data}, status=status.HTTP_200_OK)
     
 class AnalyticsView(generics.GenericAPIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated,IsEmployeeAndCanAccessAnalyticsReports]
 
     def get(self, request):
         try:
