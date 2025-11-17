@@ -19,6 +19,7 @@ class Booking(models.Model):
     price = models.CharField(max_length=100, blank=True, null=True)
     notes = models.TextField(blank=True, null=True)
     payment = models.OneToOneField(Payment, on_delete=models.SET_NULL, null=True, blank=True)
+    reminder_hours_before = models.IntegerField(default=1)
     created_at = models.DateTimeField(auto_now_add=True)
     google_event_id = models.CharField(max_length=255, blank=True, null=True)
     event_link = models.URLField(blank=True, null=True)

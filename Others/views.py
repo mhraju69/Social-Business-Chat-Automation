@@ -35,42 +35,40 @@ class ClientBookingView(APIView):
         if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
 
-        if not hasattr(company, 'google_account'):
-            return Response({"error": "Company has not connected Google Calendar"}, status=400)
-
         serializer = BookingSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         
         booking = serializer.save(company=company)
 
         # create event in Google Calendar
-        google_account = company.google_account
-        access_token = get_google_access_token(google_account)
-        if not access_token:
-            return Response({"error": "Unable to get access token"}, status=400)
+        google_account = GoogleAccount.objects.filter(company=company).first()
+        if google_account:
+            access_token = get_google_access_token(google_account)
+            if not access_token:
+                return Response({"error": "Unable to get access token"}, status=400)
 
-        event_data = {
-            "summary": booking.title,
-            "description": booking.notes or "",
-            "start": {"dateTime": booking.start_time.isoformat(), "timeZone": company.timezone},
-            "end": {"dateTime": booking.end_time.isoformat() if booking.end_time else booking.start_time.isoformat(), 
-                    "timeZone": company.timezone},
-            "location": booking.location or "",
-            "attendees": [{"email": booking.client}] if booking.client else [],
-        }
+            event_data = {
+                "summary": booking.title,
+                "description": booking.notes or "",
+                "start": {"dateTime": booking.start_time.isoformat(), "timeZone": company.timezone},
+                "end": {"dateTime": booking.end_time.isoformat() if booking.end_time else booking.start_time.isoformat(), 
+                        "timeZone": company.timezone},
+                "location": booking.location or "",
+                "attendees": [{"email": booking.client}] if booking.client else [],
+            }
 
-        headers = {"Authorization": f"Bearer {access_token}"}
-        response = requests.post(
-            "https://www.googleapis.com/calendar/v3/calendars/primary/events",
-            headers=headers,
-            json=event_data
-        )
+            headers = {"Authorization": f"Bearer {access_token}"}
+            response = requests.post(
+                "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+                headers=headers,
+                json=event_data
+            )
 
-        if response.status_code in [200, 201]:
-            event = response.json()
-            booking.google_event_id = event.get("id")
-            booking.event_link = event.get("htmlLink")
-            booking.save()
+            if response.status_code in [200, 201]:
+                event = response.json()
+                booking.google_event_id = event.get("id")
+                booking.event_link = event.get("htmlLink")
+                booking.save()
         if number: 
             text_message = (
                     f"Booking Confirmed\n"
