@@ -40,6 +40,7 @@ class KnowledgeBaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = KnowledgeBase
         fields = '__all__'
+        read_only_fields = ['user']
 
 class GoogleAccountSerializer(serializers.ModelSerializer):
     class Meta:

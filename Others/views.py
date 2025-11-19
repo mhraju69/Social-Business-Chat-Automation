@@ -448,9 +448,16 @@ class MarkAlertReadView(APIView):
             return Response({"detail": "Alert not found"}, status=status.HTTP_404_NOT_FOUND)
 
 class KnowledgeBaseListCreateView(generics.ListCreateAPIView):
-    queryset = KnowledgeBase.objects.all()
     serializer_class = KnowledgeBaseSerializer
-    permission_classes = [permissions.IsAuthenticated]  # optional, remove if public
+    permission_classes = [permissions.IsAuthenticated] 
+
+    def get_queryset(self):
+        return KnowledgeBase.objects.filter(user=self.request.user)
+    
+    def perform_create(self, serializer):
+        serializer.save(user=self.request.user)
+
+    
 
 class KnowledgeBaseRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     queryset = KnowledgeBase.objects.all()
