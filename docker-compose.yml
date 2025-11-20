@@ -18,7 +18,20 @@ services:
     image: redis:7
     container_name: talkfusion_redis
     ports:
-      - "6378:6379"
+      - "6379:6379"
+
+  celery_worker:
+    build: .
+    container_name: celery_worker
+    command: celery -A Talkfusion worker -l info --pool=solo
+    volumes:
+      - .:/app
+    working_dir: /app
+    depends_on:
+      - redis
+      - web
+    restart: always
+
   nginx:
     image: nginx:latest
     container_name: talkfusion_nginx
