@@ -19,5 +19,6 @@ urlpatterns = [
     path('company/employee/', AddEmployeeView.as_view(), name='add-employee'),
     path('company/employee/check-permissions/', GetPermissionsView.as_view(), name='employee-list'),
     path('company/employee/update-permissions/', UpdatePermissionsView.as_view(), name='employee-list'),
-    path('google/login/',SocialAuthCallbackView.as_view())
+    path('google/login/',SocialAuthCallbackView.as_view()),
+    path('reset-password/',ResetPassword.as_view()),
 ]

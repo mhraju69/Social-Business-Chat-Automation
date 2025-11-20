@@ -1,5 +1,5 @@
 # views.py
-from rest_framework import viewsets, permissions, status , generics
+from rest_framework import viewsets, permissions, status , generics, decorators
 from rest_framework.response import Response
 from .utils import *
 from .models import User
@@ -26,7 +26,41 @@ class UserViewSet(viewsets.ModelViewSet):
         if role:
             queryset = queryset.filter(role=role)
         return queryset
+    
+    @decorators.action(detail=False, methods=['patch'], url_path='me')
+    def update_me(self, request):
+        user = request.user
+        serializer = self.get_serializer(user, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
+class ResetPassword(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        email = request.data.get('email')
+        new_password = request.data.get('new_password')
+
+        if not email or not new_password :
+            return Response(
+                {"error": "Email and new password are required."},
+                status=400
+            )
+        
+        elif request.user.email != email :
+            return Response(
+                {"error": "You can only reset your own password."},
+                status=403)
+        
+        try:
+            user = User.objects.get(email=email)
+            user.set_password(new_password)
+            user.save()
+            return Response({"success": True, "message": "Password reset successfully"}, status=200)
+        except User.DoesNotExist:
+            return Response({"error": "User not found"}, status=404)
+        
 class GetOtp(APIView):
     permission_classes = [permissions.AllowAny]
 
