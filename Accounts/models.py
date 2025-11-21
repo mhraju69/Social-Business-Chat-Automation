@@ -37,6 +37,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     phone = models.CharField(max_length=20, blank=True, null=True)
     role = models.CharField(max_length=10, choices=ROLE, default='user',verbose_name="User Role")
     dob = models.DateField(blank=True, null=True,verbose_name="Date of Birs")
+    timezone = models.CharField(max_length=10,default=0)
     is_active = models.BooleanField(default=False,verbose_name="Active User")
     is_staff = models.BooleanField(default=False,verbose_name="Staff User")  
     is_superuser = models.BooleanField(default=False,verbose_name="Super User")  

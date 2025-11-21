@@ -4,6 +4,8 @@ from Socials.models import *
 from Socials.webhook import *
 import json
 import re
+import pytz
+from datetime import timedelta,datetime
 
 def format_whatsapp_number(number):
 
@@ -31,4 +33,40 @@ def send_via_webhook_style(client_number, message_text):
         return {"error": "No active WhatsApp profile"}
     
     # Use the same send_message function your webhook uses
+    print('☘️ Send successfuly')
     return send_message(profile, client_obj, message_text)
+
+
+def parse_timezone_offset(tz_string):
+    """Convert timezone string like '+6' to pytz FixedOffset"""
+    try:
+        offset_hours = float(tz_string)
+        offset_minutes = int(offset_hours * 60)
+        return pytz.FixedOffset(offset_minutes)
+    except (ValueError, TypeError):
+        return pytz.UTC
+
+def get_reminder_time_utc(start_time_utc, reminder_hours_before, tz_offset):
+    """
+    Calculate reminder time in UTC
+    start_time_utc: Already in UTC from DB
+    """
+    user_tz = parse_timezone_offset(tz_offset)
+    
+    # Convert to user local time
+    start_local = start_time_utc.astimezone(user_tz)
+    
+    # Calculate reminder time in local timezone
+    reminder_local = start_local - timedelta(hours=reminder_hours_before)
+    
+    # Convert to UTC for Celery
+    reminder_utc = reminder_local.astimezone(pytz.UTC)
+    
+    # Debug logging
+    print(f"🕐 Start time (UTC): {start_time_utc}")
+    print(f"🌍 Start time (Local): {start_local}")
+    print(f"⏰ Reminder time (Local): {reminder_local}")
+    print(f"🌐 Reminder time (UTC): {reminder_utc}")
+    print(f"⏱️  Current time (UTC): {timezone.now()}")
+    
+    return reminder_utc
