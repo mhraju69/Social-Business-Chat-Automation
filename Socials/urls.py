@@ -5,5 +5,5 @@ from .views import *
 urlpatterns = [
     path('chat-profile/', ChatProfileView.as_view()),
     path('question-leaderboard/', CommonAskedLeaderboard.as_view()),
-
+    path('old-message/<str:platform>/<int:room_id>/', GetOldMessage.as_view()),
 ]

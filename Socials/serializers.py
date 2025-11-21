@@ -6,3 +6,8 @@ class ChatProfileSerializers(ModelSerializer):
         model = ChatProfile
         fields = ['bot_active']
         read_only_fields = ["user","platform"]
+
+class ChatMessageSerializer(ModelSerializer):
+    class Meta:
+        model = ChatMessage
+        fields = '__all__'

@@ -257,3 +257,22 @@ class CommonAskedLeaderboard(APIView):
         ).order_by('-count')[:10]  # top 20 questions
 
         return Response(data)
+
+class GetOldMessage(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request,room_id,platform):
+        user = request.user
+        if not ChatRoom.objects.filter(id=room_id,profile__user=user,profile__platform=platform).exists():
+            return Response({"error": "Room not found"}, status=404)
+            
+
+        try:
+            room = ChatRoom.objects.get(id=room_id,profile__platform=platform)
+            messages = ChatMessage.objects.filter(room=room).order_by('-timestamp')[:50]
+            serializer = ChatMessageSerializer(messages, many=True)
+            return Response(serializer.data)
+        except ChatRoom.DoesNotExist:
+            return Response({"error": "Room not found"}, status=404)
+        
+
+
