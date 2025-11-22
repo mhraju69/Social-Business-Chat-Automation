@@ -199,22 +199,24 @@ def unified_webhook(request, platform):
             # --- Unified Chat handling ---
             if not client_id or not text:
                 return JsonResponse({"status": "no_client_or_text"})
-
-            client_obj, _ = ChatClient.objects.get_or_create(platform=platform, client_id=client_id)
-            room, _ = ChatRoom.objects.get_or_create(profile=profile, client=client_obj)
             
-            # Incoming message save করো
-            ChatMessage.objects.create(room=room, type="incoming", text=text)
-
-            # 🔥 WebSocket এ broadcast করো (Real-time update!)
-            broadcast_message(profile, client_obj, text, "incoming",room.id)
-
-            # AI reply generate করো
-            reply_text = generate_ai_response(text, platform)
             
-            # Reply পাঠাও
-            if profile.bot_active and room.bot_active:
-                send_message(profile, client_obj, reply_text)
+            if client_id != profile_id :
+                
+                client_obj, _ = ChatClient.objects.get_or_create(platform=platform, client_id=client_id)
+                room, _ = ChatRoom.objects.get_or_create(profile=profile, client=client_obj)
+                
+                # Incoming message save করো
+                ChatMessage.objects.create(room=room, type="incoming", text=text)
+
+                # 🔥 WebSocket এ broadcast করো (Real-time update!)
+                broadcast_message(profile, client_obj, text, "incoming",room.id)
+
+                # AI reply generate করো
+                reply_text = generate_ai_response(text, platform)
+
+                if profile.bot_active and room.bot_active:
+                    send_message(profile, client_obj, reply_text)
             
 
         except Exception as e:

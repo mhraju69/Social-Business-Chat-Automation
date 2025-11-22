@@ -17,6 +17,7 @@ class ChatProfile(models.Model):
     platform = models.CharField(max_length=20, choices=PLATFORM_CHOICES)
 
     # Generic IDs
+    name = models.CharField(max_length=150, blank=True, null=True)
     profile_id = models.CharField(max_length=150, unique=True)   # e.g. number_id, page_id, instagram_id
     access_token = EncryptedCharField(max_length=5000)
     bot_active = models.BooleanField(default=True)

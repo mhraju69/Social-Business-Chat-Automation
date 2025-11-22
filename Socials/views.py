@@ -23,12 +23,12 @@ def Connect(request):
 
 class FacebookConnectView(APIView):
     permission_classes = [AllowAny]
-    # permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        
         fb_app_id = settings.FB_APP_ID
         redirect_uri = "https://ape-in-eft.ngrok-free.app/facebook/callback/"
+        
+        # ✅ Added pages_messaging permission
         scope = "pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging"
         state = 1
         # state = request.user.id
@@ -42,19 +42,70 @@ class FacebookConnectView(APIView):
         )
 
         return redirect(fb_login_url)
+
+
+def subscribe_page_to_webhook(page_id, page_access_token):
+    """
+    ✅ Facebook Page কে Webhook এ subscribe করে
+    এটা না করলে message webhook এ আসবে না!
+    """
+    try:
+        subscribe_url = f"https://graph.facebook.com/v20.0/{page_id}/subscribed_apps"
+        params = {
+            "subscribed_fields": "messages,messaging_postbacks,messaging_optins,message_echoes",
+            "access_token": page_access_token
+        }
         
+        print(f"🔄 Subscribing Page {page_id} to webhook...")
+        response = requests.post(subscribe_url, params=params)
+        result = response.json()
+        
+        if result.get('success'):
+            print(f"✅ Page {page_id} subscribed successfully!")
+            return True
+        else:
+            print(f"❌ Failed to subscribe page {page_id}: {result}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error subscribing page {page_id}: {e}")
+        return False
+
+
+def check_page_subscription(page_id, page_access_token):
+    """
+    Page এর current subscription status check করে
+    """
+    try:
+        check_url = f"https://graph.facebook.com/v20.0/{page_id}/subscribed_apps"
+        params = {"access_token": page_access_token}
+        
+        response = requests.get(check_url, params=params)
+        result = response.json()
+        
+        print(f"📊 Page {page_id} subscription status: {result}")
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error checking subscription: {e}")
+        return None
+
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def facebook_callback(request):
-
     code = request.GET.get("code")
     error = request.GET.get("error")
-    state = request.GET.get("state")  # can pass user id/session
+    state = request.GET.get("state")
 
     if error:
         return JsonResponse({"error": error})
     if not code:
         return JsonResponse({"error": "Missing code parameter"})
+
+    print(f"\n{'='*60}")
+    print(f"📱 Facebook OAuth Callback Received")
+    print(f"{'='*60}")
 
     # Step 1: Exchange code for short-lived User Access Token
     token_url = "https://graph.facebook.com/v20.0/oauth/access_token"
@@ -64,30 +115,46 @@ def facebook_callback(request):
         "client_secret": settings.FB_APP_SECRET,
         "code": code,
     }
+    
     resp = requests.get(token_url, params=params)
     data = resp.json()
+    
     if "access_token" not in data:
+        print(f"❌ Token exchange failed: {data}")
         return JsonResponse({"error": "Token exchange failed", "details": data})
 
     user_access_token = data["access_token"]
+    print(f"✅ User access token obtained")
 
     # Step 2: Get all pages of the user
     pages_url = "https://graph.facebook.com/v20.0/me/accounts"
     pages_resp = requests.get(pages_url, params={"access_token": user_access_token})
     pages_data = pages_resp.json()
+    
     if "data" not in pages_data:
+        print(f"❌ Failed to fetch pages: {pages_data}")
         return JsonResponse({"error": "Failed to fetch pages", "details": pages_data})
 
+    print(f"📄 Found {len(pages_data['data'])} page(s)")
+
     # Step 3: Get Django user instance
-    user = User.objects.get(id=state)  # replace with real session handling
+    try:
+        user = User.objects.get(id=state)
+    except User.DoesNotExist:
+        print(f"❌ User not found with ID: {state}")
+        return JsonResponse({"error": "User not found"})
 
     saved_pages = []
+    subscription_results = []
 
-    # Step 4: Save each page in FacebookProfile
+    # Step 4: Save each page and subscribe to webhook
     for page in pages_data["data"]:
         page_id = page["id"]
         page_name = page.get("name", "")
         short_lived_token = page["access_token"]
+
+        print(f"\n{'─'*60}")
+        print(f"📄 Processing Page: {page_name} (ID: {page_id})")
 
         # Step 4a: Exchange for long-lived Page Access Token
         exchange_url = "https://graph.facebook.com/v20.0/oauth/access_token"
@@ -97,24 +164,57 @@ def facebook_callback(request):
             "client_secret": settings.FB_APP_SECRET,
             "fb_exchange_token": short_lived_token,
         }
+        
         exchange_resp = requests.get(exchange_url, params=exchange_params)
         exchange_data = exchange_resp.json()
-        long_lived_token = exchange_data.get("access_token", short_lived_token)  # fallback
+        long_lived_token = exchange_data.get("access_token", short_lived_token)
+        
+        print(f"✅ Long-lived token obtained for {page_name}")
 
-        # Step 4b: Save/update FacebookProfile in DB
+        # Step 4b: Save/update ChatProfile in DB
         fb_profile, created = ChatProfile.objects.update_or_create(
             profile_id=page_id,
             defaults={
                 "user": user,
+                "name": page_name,
                 "access_token": long_lived_token,
                 "bot_active": True,
-                'platform': 'facebook',
+                "platform": "facebook",
             }
         )
-        saved_pages.append({"id": page_id, "name": page_name})
+        
+        action = "Created" if created else "Updated"
+        print(f"✅ ChatProfile {action} for {page_name}")
 
-    # return Response({"status": "success", "accounts": saved_pages})
-    return HttpResponse("Facebook pages connected successfully.")
+        # ✅ Step 4c: Subscribe page to webhook (CRITICAL!)
+        subscription_success = subscribe_page_to_webhook(page_id, long_lived_token)
+        
+        # Step 4d: Verify subscription
+        subscription_status = check_page_subscription(page_id, long_lived_token)
+
+        saved_pages.append({
+            "id": page_id,
+            "name": page_name,
+            "subscribed": subscription_success
+        })
+        
+        subscription_results.append({
+            "page": page_name,
+            "subscription_success": subscription_success,
+            "subscription_status": subscription_status
+        })
+
+    print(f"\n{'='*60}")
+    print(f"✅ All pages processed successfully!")
+    print(f"{'='*60}\n")
+
+    # Return detailed response
+    return JsonResponse({
+        "status": "success",
+        "message": "Facebook pages connected and subscribed successfully",
+        "pages": saved_pages,
+        "subscription_details": subscription_results
+    })
 
 class InstagramConnectView(APIView):
     permission_classes = [AllowAny]

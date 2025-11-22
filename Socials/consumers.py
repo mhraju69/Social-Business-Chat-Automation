@@ -59,6 +59,7 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
             profile_info = {
                 'platform': p.platform,
                 'profile_id': p.profile_id,
+                'profile_name': p.name if p.name else p.profile_id,
                 'room': [
                     {
                         'client_id': room.client.client_id,
