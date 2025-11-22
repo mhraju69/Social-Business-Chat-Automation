@@ -7,30 +7,80 @@ from simple_history.models import HistoricalRecords
 from django.db.models import Sum
 from django.utils.timezone import now
 from django.db.models import Avg
+from dateutil.relativedelta import relativedelta
 # Create your models here.
 
 class Plan(models.Model):
-    PLAN = [("basic", "Basic"),("business", "Business"),("premium", "Premium"),]
-    DURATION = [("monthly", "Monthly"),("yearly", "Yearly")]
-    name = models.CharField(choices=PLAN)
+    PLAN = [
+        ("basic", "Basic"),
+        ("business", "Business"),
+        ("premium", "Premium"),
+    ]
+    DURATION = [
+        ("days", "Daily"),
+        ("months", "Monthly"),
+        ("years", "Yearly"),
+    ]
+
+    name = models.CharField(max_length=20, choices=PLAN)
     price = models.CharField(max_length=10)
-    duration = models.CharField(choices=DURATION)
+    duration = models.CharField(max_length=10, choices=DURATION)
 
     class Meta:
-        unique_together = ('name', 'duration')  
+        unique_together = ('name', 'duration')
         verbose_name = "Plan"
         verbose_name_plural = "Plans"
 
     def __str__(self):
         return f"{self.get_name_display()} ({self.get_duration_display()})"
 
+
 class PlanValue(models.Model):
-    plan = models.ForeignKey(Plan,on_delete=models.CASCADE,related_name='plan_value')
-    value = models.CharField(max_length=100) 
+    plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name='plan_value')
+    value = models.CharField(max_length=100)
 
     def __str__(self):
         return f"{self.plan.name} - {self.value}"
-    
+
+
+class Subscriptions(models.Model):
+    company = models.ForeignKey(Company, related_name='subscriptions', on_delete=models.CASCADE)
+    plan = models.ForeignKey(Plan, on_delete=models.CASCADE)
+    start = models.DateTimeField(auto_now_add=True)
+    end = models.DateTimeField(blank=True, null=True)
+    active = models.BooleanField(default=True)
+
+    def save(self, *args, **kwargs):
+
+        # Fetch plan safely using plan_id
+        plan_obj = None
+        if self.plan_id:
+            plan_obj = Plan.objects.get(id=self.plan_id)
+
+        # Auto-set end date based on plan.duration
+        if not self.end and plan_obj:
+
+            if plan_obj.duration == 'days':
+                self.end = self.start + timedelta(days=1)
+
+            elif plan_obj.duration == 'months':
+                self.end = self.start + relativedelta(months=1)
+
+            elif plan_obj.duration == 'years':
+                self.end = self.start + relativedelta(years=1)
+
+        super().save(*args, **kwargs)
+
+        # Deactivate previous active subscriptions
+        self.company.subscriptions.exclude(id=self.id).filter(
+            active=True,
+            end__gte=timezone.now()
+        ).update(active=False)
+
+    def __str__(self):
+        return f"{self.company} - {self.plan.name}"
+
+
 class StripeCredential(models.Model):
     company = models.OneToOneField(Company,related_name='stripe',  on_delete=models.CASCADE)
     api_key = models.CharField(max_length=255, verbose_name="Stripe API Key")
