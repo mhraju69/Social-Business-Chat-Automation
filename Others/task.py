@@ -1,16 +1,15 @@
+from django.utils import timezone
 from celery import shared_task
 from django.core.mail import send_mail
-from django.conf import settings
-from django.utils.timezone import now
 from .models import Booking
-
+import time    
+from Socials.models import ChatRoom, ChatMessage
+from Socials.helper import generate_ai_response, send_message
 
 @shared_task
 def send_booking_reminder(booking_id):
     """Send booking reminder via email/SMS"""
     try:
-        from .models import Booking
-        
         booking = Booking.objects.get(id=booking_id)
         
         print(f"📧 Sending reminder for booking #{booking.id}")
@@ -44,7 +43,6 @@ def send_booking_reminder(booking_id):
         
         # Send email
         if booking.client:
-            from django.core.mail import send_mail
             send_mail(
                 subject=f"Reminder: {booking.title}",
                 message=message,
@@ -61,3 +59,66 @@ def send_booking_reminder(booking_id):
         import traceback
         traceback.print_exc()
         raise
+
+@shared_task
+def wait_and_reply(room_id, delay=15):
+    """
+    Waits for 'delay' seconds to batch incoming messages for a room,
+    then sends AI-generated reply for all unprocessed incoming messages
+    that arrived after the last outgoing message.
+    """
+    import time
+    time.sleep(delay)  # Wait for additional messages
+
+    try:
+        room = ChatRoom.objects.get(id=room_id)
+    except ChatRoom.DoesNotExist:
+        return f"Room {room_id} does not exist"
+
+    now = timezone.now()
+
+    # If new message arrived within delay → cancel this task
+    if room.last_incoming_time and (now - room.last_incoming_time).total_seconds() < delay:
+        room.is_waiting_reply = False
+        room.save(update_fields=["is_waiting_reply"])
+        return "New incoming detected → task canceled"
+
+    # Fetch all unprocessed incoming messages after last outgoing
+    if room.last_outgoing_time:
+        incoming_msgs = ChatMessage.objects.filter(
+            room=room,
+            type="incoming",
+            processed=False,
+            created_at__gt=room.last_outgoing_time
+        )
+    else:
+        incoming_msgs = ChatMessage.objects.filter(
+            room=room,
+            type="incoming",
+            processed=False
+        )
+
+    if not incoming_msgs.exists():
+        room.is_waiting_reply = False
+        room.save(update_fields=["is_waiting_reply"])
+        return "No unprocessed incoming messages → nothing to reply"
+
+    # Combine all incoming texts
+    full_text = "\n".join(msg.text for msg in incoming_msgs)
+
+    # Generate AI reply
+    reply_text = generate_ai_response(full_text, room.profile.platform)
+
+    # Send reply via existing send_message function
+    send_message(room.profile, room.client, reply_text)
+
+    # Mark messages as processed
+    incoming_msgs.update(processed=True)
+
+    # Update room timestamps & reset waiting flag
+    room.last_outgoing_time = timezone.now()
+    room.last_incoming_time = None
+    room.is_waiting_reply = False
+    room.save(update_fields=["last_outgoing_time", "last_incoming_time", "is_waiting_reply"])
+
+    return f"Reply sent for room {room.id}"

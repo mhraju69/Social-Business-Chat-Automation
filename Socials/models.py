@@ -54,6 +54,9 @@ class ChatRoom(models.Model):
     client = models.ForeignKey(ChatClient, related_name='rooms', on_delete=models.CASCADE)
     bot_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    last_outgoing_time  = models.DateTimeField(null=True, blank=True)
+    last_incoming_time  = models.DateTimeField(null=True, blank=True)
+    is_waiting_reply = models.BooleanField(default=False)
 
     class Meta:
         verbose_name = "Chat Room"
@@ -73,6 +76,7 @@ class ChatMessage(models.Model):
     room = models.ForeignKey(ChatRoom, related_name='messages', on_delete=models.CASCADE)
     type = models.CharField(max_length=10, choices=MESSAGE_TYPE)
     text = models.TextField()
+    processed = models.BooleanField(default=False)
     message_id = models.CharField(max_length=150, blank=True, null=True)
     timestamp = models.DateTimeField(auto_now_add=True)
     send_by_bot = models.BooleanField(default=False)

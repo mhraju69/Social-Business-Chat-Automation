@@ -253,6 +253,43 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
             print(f"❌ Send Message Error: {e}")
             return {'success': False, 'error': str(e)}
 
+
+def broadcast_message(profile, client_obj, message_text, message_type, room_id=None):
+    """
+    Webhook থেকে WebSocket এ message broadcast করে
+    
+    Args:
+        profile: ChatProfile object
+        client_obj: ChatClient object
+        message_text: Message content
+        message_type: 'incoming' or 'outgoing'
+        room_id: Optional room ID
+    """
+    try:
+        channel_layer = get_channel_layer()
+        group_name = f"chat_{profile.platform}_{profile.profile_id}"
+
+        from datetime import datetime
+        
+        # Group এ message পাঠাই
+        async_to_sync(channel_layer.group_send)(
+            group_name,
+            {
+                'type': 'chat_message',  # Consumer এর method name
+                'platform': profile.platform,
+                'client_id': client_obj.client_id,
+                'message': message_text,
+                'message_type': message_type,
+                'timestamp': datetime.now().isoformat(),
+                'room_id': room_id
+            }
+        )
+        print(f"✅ Broadcast Success: {group_name}")
+        
+    except Exception as e:
+        print(f"❌ Broadcast Error: {e}")
+
+
 class AlertConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         # Get JWT token from query params
