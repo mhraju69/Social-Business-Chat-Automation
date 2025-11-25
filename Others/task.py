@@ -61,7 +61,7 @@ def send_booking_reminder(booking_id):
         raise
 
 @shared_task
-def wait_and_reply(room_id, delay=15):
+def wait_and_reply(room_id, delay):
     """
     Waits for 'delay' seconds to batch incoming messages for a room,
     then sends AI-generated reply for all unprocessed incoming messages

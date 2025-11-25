@@ -25,6 +25,7 @@ class Plan(models.Model):
     name = models.CharField(max_length=20, choices=PLAN)
     price = models.CharField(max_length=10)
     duration = models.CharField(max_length=10, choices=DURATION)
+    custom = models.BooleanField(default=False)
 
     class Meta:
         unique_together = ('name', 'duration')

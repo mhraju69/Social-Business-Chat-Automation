@@ -48,6 +48,7 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['company']
 
+
 class SupportTicketSerializer(serializers.ModelSerializer):
     user = serializers.StringRelatedField(read_only=True)
     ticket_id = serializers.CharField(read_only=True)

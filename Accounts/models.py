@@ -59,9 +59,9 @@ class User(AbstractBaseUser, PermissionsMixin):
     def save(self, *args, **kwargs):
         if self.password and not self.password.startswith('pbkdf2_sha256$'):
             self.set_password(self.password)
-        if self.role == 'admin':
-            self.is_staff = True
-            self.is_superuser = True
+        if self.is_staff == True and self.is_superuser == True:
+            self.role = 'admin'
+            
         super().save(*args, **kwargs)
     
     @property
@@ -141,7 +141,6 @@ class Service(models.Model):
     history = HistoricalRecords()
 
 class Employee(models.Model):
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='employee')
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='employees')
     roles = models.JSONField(default=list)  # Store roles as JSON list
     

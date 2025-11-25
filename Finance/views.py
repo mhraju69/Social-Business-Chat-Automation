@@ -56,7 +56,12 @@ class GetPlans(APIView):
     serializer_class = PlanSerializers
 
     def get(self, request):
-        plans = Plan.objects.all()  
+        user = request.user
+        if user.role == 'admin':
+            plans = Plan.objects.all()  
+        else:
+            plans = Plan.objects.filter(custom=True).exclude(custom=True)
+
         serializer = self.serializer_class(plans, many=True)  
         return Response(serializer.data)
     

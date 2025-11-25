@@ -141,7 +141,7 @@ def unified_webhook(request, platform):
             #---------------------------------------------
             # BATCH REPLY SYSTEM ACTIVATION
             #---------------------------------------------
-            
+
             if profile.bot_active and room.bot_active and not room.is_waiting_reply:
                 room.is_waiting_reply = True
                 room.save(update_fields=["is_waiting_reply"])

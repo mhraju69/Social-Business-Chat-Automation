@@ -90,20 +90,24 @@ class Booking(models.Model):
         return qs    
 
 class FAQ(models.Model):
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='faqs')
     question = models.TextField()   
     answer = models.TextField()
-    category = models.CharField(max_length=100, blank=True)
+    category = models.CharField(max_length=100, blank=True,null=True)
     is_active = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
 class GoogleAccount(models.Model):
     company = models.OneToOneField(Company, on_delete=models.CASCADE, related_name='google_account')
-    access_token = models.TextField()
-    refresh_token = models.TextField()
+    access_token = models.TextField(blank=True,null=True)
+    refresh_token = models.TextField(blank=True,null=True)
     token_uri = models.TextField(default='https://oauth2.googleapis.com/token')
     scopes = models.JSONField(default=list)
-    token_expiry = models.DateTimeField(blank=True, null=True)
+    client_id = models.TextField(blank=True,null=True)
+    client_secret = models.TextField(blank=True,null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return f"{self.company.name} - Google Connected"
@@ -205,5 +209,3 @@ class SupportTicket(models.Model):
         if not self.ticket_id:
             self.ticket_id = self.generate_ticket_id()
         super().save(*args, **kwargs)
-
-    
