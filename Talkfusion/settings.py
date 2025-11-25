@@ -64,6 +64,7 @@ INSTALLED_APPS = [
     'simple_history',
     'Socials',
     'Finance',
+    'admin_dashboard',
 ]
 
 MIDDLEWARE = [

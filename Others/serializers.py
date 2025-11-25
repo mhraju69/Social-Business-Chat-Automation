@@ -1,4 +1,5 @@
 # serializers.py
+import datetime
 from rest_framework import serializers
 from .models import *
 from Socials.models import *
@@ -52,8 +53,24 @@ class GoogleAccountSerializer(serializers.ModelSerializer):
 class SupportTicketSerializer(serializers.ModelSerializer):
     user = serializers.StringRelatedField(read_only=True)
     ticket_id = serializers.CharField(read_only=True)
-    
+    time_since_created = serializers.SerializerMethodField()
     class Meta:
         model = SupportTicket
         fields = '__all__'
-        read_only_fields = ('user', 'ticket_id', 'created_at', 'updated_at')
+        read_only_fields = ('user', 'ticket_id', 'subject', 'status', 'created_at', 'updated_at', 'time_since_created')
+    
+    def get_time_since_created(self, obj):
+        delta = datetime.datetime.now(datetime.timezone.utc) - obj.created_at
+        days = delta.days
+        seconds = delta.seconds
+        hours = seconds // 3600
+        minutes = (seconds % 3600) // 60
+
+        if days > 0:
+            return f"{days} days ago"
+        elif hours > 0:
+            return f"{hours} hours ago"
+        elif minutes > 0:
+            return f"{minutes} minutes ago"
+        else:
+            return "Just now"

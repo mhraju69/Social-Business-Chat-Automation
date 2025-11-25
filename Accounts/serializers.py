@@ -7,11 +7,13 @@ from rest_framework_simplejwt.tokens import RefreshToken
 
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True)
+    company = serializers.SerializerMethodField()
+    status = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ['id', 'name', 'email', 'password', 'image', 'phone', 'role', 'dob', 'is_active', 'is_staff', 'is_superuser', 'block', 'date_joined']
-        read_only_fields = ['is_active', 'is_staff', 'is_superuser', 'date_joined','id','role']
+        fields = ['id', 'name', 'email', 'password', 'image', 'phone', 'role', 'dob', 'is_active', 'is_staff', 'is_superuser', 'block', 'date_joined', 'company', 'status']
+        read_only_fields = ['is_active', 'is_staff', 'is_superuser', 'date_joined','id','role', 'company', 'status']
 
     def create(self, validated_data):
         password = validated_data.pop('password', None)
@@ -30,6 +32,20 @@ class UserSerializer(serializers.ModelSerializer):
             instance.set_password(password)
         instance.save()
         return instance
+    
+    def get_company(self, obj):
+        company = Company.objects.filter(user=obj).first()
+        if company:
+            return CompanySerializer(company).data
+        return None
+    
+    def get_status(self, obj):
+        if obj.block:
+            return "Blocked"
+        elif not obj.is_active:
+            return "Inactive"
+        else:
+            return "Active"
 
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
