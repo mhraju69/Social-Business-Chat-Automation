@@ -21,5 +21,6 @@ urlpatterns = [
     path('connect/fb/', FacebookConnectView.as_view(),name='facebook_connect'),
     path('connect/ig/', InstagramConnectView.as_view(),name='instagram_connect'),
     path('', RedirectView.as_view(url='/admin/', permanent=False)),
+    path('api/admin/', include('admin_dashboard.urls'))
 
 ]
