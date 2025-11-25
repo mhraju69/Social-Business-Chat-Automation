@@ -12,9 +12,10 @@ from django.db.models import Sum, Q
 from Others.serializers import SupportTicketSerializer
 from Accounts.serializers import UserSerializer
 from rest_framework.filters import OrderingFilter, SearchFilter
+from Accounts.permissions import IsAdmin
 
 class DashboardView(generics.GenericAPIView):
-    permission_classes = [permissions.AllowAny]
+    permission_classes = [IsAdmin]
 
     def get(self, request, *args, **kwargs):
         total_user = User.objects.count()
@@ -60,7 +61,7 @@ class DashboardView(generics.GenericAPIView):
 class UserListView(generics.ListAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdmin]
 
     filter_backends = [SearchFilter, OrderingFilter]
     search_fields = ['name', 'email', 'phone']
@@ -68,7 +69,7 @@ class UserListView(generics.ListAPIView):
 
 
 class EnableChannelsView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdmin]
 
     def post(self, request, *args, **kwargs):
         channel_name = request.data.get("channel_name")
@@ -84,7 +85,7 @@ class EnableChannelsView(APIView):
         return Response({"error": "Channel name not provided."}, status=400)
 
 class DisableChannelsView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdmin]
 
     def post(self, request, *args, **kwargs):
         channel_name = request.data.get("channel_name")
@@ -100,7 +101,7 @@ class DisableChannelsView(APIView):
         return Response({"error": "Channel name not provided."}, status=400)
     
 class ApproveChannelsView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdmin]
 
     def post(self, request, *args, **kwargs):
         chat_profile_id = request.data.get("chat_profile_id")
@@ -118,7 +119,7 @@ class ApproveChannelsView(APIView):
         return Response({"error": "Chat profile id not provided."}, status=400)
     
 class RejectChannelsView(APIView):
-    permission_classes = [permissions.IsAdminUser]
+    permission_classes = [IsAdmin]
 
     def post(self, request, *args, **kwargs):
         chat_profile_id = request.data.get("chat_profile_id")
@@ -135,6 +136,8 @@ class RejectChannelsView(APIView):
         return Response({"error": "Chat profile id not provided."}, status=400)
     
 class UserChannelsView(APIView):
+    permission_classes = [IsAdmin]
+
     def get(self, request, user_id, *args, **kwargs):
         try:
             user = User.objects.get(id=user_id)

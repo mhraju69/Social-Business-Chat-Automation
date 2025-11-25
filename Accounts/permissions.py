@@ -69,6 +69,18 @@ PERMISSION_NAMES = {
     'api_management': 'API Management',
 }
 
+class IsAdmin(BasePermission):
+    """Allow access only to admin users (is_staff=True AND is_superuser=True AND role='admin')."""
+    def has_permission(self, request, view):
+        return bool(
+            request.user 
+            and request.user.is_authenticated 
+            and request.user.role == 'admin'
+            and request.user.is_staff 
+            and request.user.is_superuser
+        )
+
+
 class IsOwner(BasePermission):
     """Allow access only to owners."""
     def has_permission(self, request, view):
