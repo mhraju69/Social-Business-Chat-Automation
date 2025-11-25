@@ -143,9 +143,10 @@ class Service(models.Model):
 class Employee(models.Model):
     company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='employees')
     roles = models.JSONField(default=list)  # Store roles as JSON list
-    
+    email = models.EmailField(max_length=255,unique=True,verbose_name="Employee Email")
+
     def __str__(self):
-        return f"{self.user.email} - {self.company.name} - {self.roles}"
+        return f"{self.email} - {self.company.name} - {self.roles}"
     
     def has_permission(self, permission_type):
         """Check if employee has specific permission based on their roles"""

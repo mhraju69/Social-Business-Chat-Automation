@@ -18,14 +18,17 @@ import string
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = UserSerializer
-    permission_classes = [permissions.AllowAny] 
+
+    def get_permissions(self):
+        if self.action == 'create':
+            return [permissions.AllowAny()]
+        return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        role = self.request.query_params.get('role')
-        if role:
-            queryset = queryset.filter(role=role)
-        return queryset
+        if self.request.user.role == 'admin':   
+            return queryset
+        return queryset.filter(id=self.request.user.id)
     
     @decorators.action(detail=False, methods=['patch'], url_path='me')
     def update_me(self, request):
@@ -163,7 +166,7 @@ class AddEmployeeView(APIView):
     def get(self, request):
         owner = request.user.email
         try:
-            company = Company.objects.get(owner__email=owner)
+            company = Company.objects.get(user__email=owner)
         except Company.DoesNotExist:
             return Response({'error': 'Company not found.'}, status=404)
         
@@ -171,7 +174,8 @@ class AddEmployeeView(APIView):
         employee_data = []
         for emp in employees:
             employee_data.append({
-                'email': emp.user.email,
+                'id': emp.id,
+                'email': emp.email,
                 'roles': emp.roles,
                 'permissions': emp.get_all_permissions(),
                 'permissions_details': emp.get_permissions_with_details()
@@ -201,7 +205,7 @@ class AddEmployeeView(APIView):
         
         owner = request.user.email
         try:
-            company = Company.objects.get(owner__email=owner)
+            company = Company.objects.get(user__email=owner)
         except Company.DoesNotExist:
             return Response({'error': 'Company not found.'}, status=404)
         
@@ -218,29 +222,23 @@ class AddEmployeeView(APIView):
         )
         
         # Create employee with roles
-        employee = Employee.objects.create(user=user, company=company, roles=roles)
+        employee = Employee.objects.create(company=company, roles=roles,email=email)
         
         # Send invitation (assuming this function exists)
         send_employee_invitation(email, password, company.name,roles)
         
-        return Response({
-            'success': f'Employee added with email {email}',
-            'password': password,  # Consider removing this in production
-            'roles': roles,
-            'permissions': employee.get_all_permissions(),
-            'permissions_details': employee.get_permissions_with_details()
-        }, status=201)
+        return Response(EmployeeSerializer(employee).data,status=status.HTTP_200_OK)
     
 class GetPermissionsView(APIView):
     """Get permissions for the authenticated user"""
     permission_classes = [permissions.IsAuthenticated,IsOwner]
 
-    def get(self, request):
+    def get(self, request,employee_id):
         user = request.user
-        employee = Employee.objects.filter(user=user).first()
+        employee = Employee.objects.filter(id=employee_id,company__user__email=user.email).first()
 
         if not employee:
-            return Response({"detail": "Employee record not found."}, status=404)
+            return Response({"detail": "Employee not found."}, status=404)
 
         # roles is a JSONField (list of strings)
         user_roles = getattr(employee, 'roles', [])
@@ -269,7 +267,9 @@ class GetPermissionsView(APIView):
         }
 
         return Response({
-            "user": getattr(user, 'email', str(user)),
+            'id': employee.id,
+            "company": employee.company.user.email,
+            'employee_email': employee.email,
             "roles": user_roles,
             "permissions": formatted_permissions
         })
@@ -278,45 +278,28 @@ class UpdatePermissionsView(APIView):
     """Update roles (permissions) for an employee - Admin only"""
     permission_classes = [permissions.IsAuthenticated,IsOwner]
 
-    def post(self, request):
+    def post(self, request,employee_id):
         # Extract target employee email and new roles
-        email = request.data.get("email")
+        employee = Employee.objects.filter(id=employee_id,company__user__email=request.user.email).first()
         new_roles = request.data.get("roles")
 
-        if not email or not new_roles:
+        if not employee or not new_roles:
             return Response(
-                {"detail": "Both 'email' and 'roles' are required."},
+                {"detail": "Employee or roles missing."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         if not isinstance(new_roles, list):
             return Response(
-                {"detail": "'roles' must be a list of role names."},
+                {"detail": "roles must be a list of role names."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Get the requesting user (from token)
-        current_user = request.user
-
-        # Find the target employee
-        target_employee = Employee.objects.filter(user__email=email).first()
-        if not target_employee:
-            return Response(
-                {"detail": f"No employee found with email {email}."},
-                status=status.HTTP_404_NOT_FOUND
-            )
-
         # Update roles (assuming roles is a JSONField)
-        target_employee.roles = new_roles
-        target_employee.save()
+        employee.roles = new_roles
+        employee.save()
 
-        return Response(
-            {
-                "detail": f"Roles updated successfully for {email}.",
-                "roles": target_employee.roles
-            },
-            status=status.HTTP_200_OK
-        )
+        return Response(EmployeeSerializer(employee).data,status=status.HTTP_200_OK)
 
 class SocialAuthCallbackView(APIView):
     permission_classes = [permissions.AllowAny]

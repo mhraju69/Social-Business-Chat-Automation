@@ -29,130 +29,128 @@ def get_google_access_token(google_account):
     result = response.json()
     return result.get("access_token")
 
-# class ClientBookingView(APIView):
-#     def post(self, request, company_id):
-#         company = Company.objects.filter(id=company_id).first()
+class ClientBookingView(APIView):
+    def post(self, request, company_id):
+        company = Company.objects.filter(id=company_id).first()
         
-#         if not company:
-#             return Response(
-#                 {"error": "Company not found"}, 
-#                 status=status.HTTP_404_NOT_FOUND
-#             )
+        if not company:
+            return Response(
+                {"error": "Company not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
         
-#         data = request.data.copy()
-#         number = data.get('number')
-#         tz_offset = company.user.timezone or "+6"
+        data = request.data.copy()
+        number = data.get('number')
+        tz_offset = company.user.timezone or "+6"
         
-#         # Convert local time to UTC
-#         if 'start_time' in data:
-#             start_time_local = data['start_time']  # "2025-11-21 06:06:00"
+        # Convert local time to UTC
+        if 'start_time' in data:
+            start_time_local = data['start_time']  # "2025-11-21 06:06:00"
             
-#             # Parse as naive datetime
-#             if isinstance(start_time_local, str):
-#                 start_dt = datetime.strptime(start_time_local, "%Y-%m-%d %H:%M:%S")
-#             else:
-#                 start_dt = start_time_local
+            # Parse as naive datetime
+            if isinstance(start_time_local, str):
+                start_dt = datetime.strptime(start_time_local, "%Y-%m-%d %H:%M:%S")
+            else:
+                start_dt = start_time_local
             
-#             # Get user timezone
-#             offset_hours = float(tz_offset)
-#             offset_minutes = int(offset_hours * 60)
-#             user_tz = pytz.FixedOffset(offset_minutes)
+            # Get user timezone
+            offset_hours = float(tz_offset)
+            offset_minutes = int(offset_hours * 60)
+            user_tz = pytz.FixedOffset(offset_minutes)
             
-#             # Localize to user timezone
-#             start_aware = user_tz.localize(start_dt)
+            # Localize to user timezone
+            start_aware = user_tz.localize(start_dt)
             
-#             # Convert to UTC
-#             start_utc = start_aware.astimezone(pytz.UTC)
+            # Convert to UTC
+            start_utc = start_aware.astimezone(pytz.UTC)
             
-#             print(f"📥 Input (local): {start_time_local}")
-#             print(f"🌍 Timezone: {tz_offset}")
-#             print(f"🌐 Saved (UTC): {start_utc}")
+            print(f"📥 Input (local): {start_time_local}")
+            print(f"🌍 Timezone: {tz_offset}")
+            print(f"🌐 Saved (UTC): {start_utc}")
             
-#             data['start_time'] = start_utc
+            data['start_time'] = start_utc
         
-#         if 'end_time' in data:
-#             end_time_local = data['end_time']
+        if 'end_time' in data:
+            end_time_local = data['end_time']
             
-#             if isinstance(end_time_local, str):
-#                 end_dt = datetime.strptime(end_time_local, "%Y-%m-%d %H:%M:%S")
-#             else:
-#                 end_dt = end_time_local
+            if isinstance(end_time_local, str):
+                end_dt = datetime.strptime(end_time_local, "%Y-%m-%d %H:%M:%S")
+            else:
+                end_dt = end_time_local
             
-#             offset_hours = float(tz_offset)
-#             offset_minutes = int(offset_hours * 60)
-#             user_tz = pytz.FixedOffset(offset_minutes)
-#             end_aware = user_tz.localize(end_dt)
-#             end_utc = end_aware.astimezone(pytz.UTC)
+            offset_hours = float(tz_offset)
+            offset_minutes = int(offset_hours * 60)
+            user_tz = pytz.FixedOffset(offset_minutes)
+            end_aware = user_tz.localize(end_dt)
+            end_utc = end_aware.astimezone(pytz.UTC)
             
-#             data['end_time'] = end_utc
+            data['end_time'] = end_utc
         
-#         # Create booking
-#         serializer = BookingSerializer(data=data)
-#         serializer.is_valid(raise_exception=True)
-#         booking = serializer.save(company=company)
+        # Create booking
+        serializer = BookingSerializer(data=data)
+        serializer.is_valid(raise_exception=True)
+        booking = serializer.save(company=company)
         
-#         # Create Google Calendar event
-#         google_account = GoogleAccount.objects.filter(company=company).first()
-#         if google_account:
-#             access_token = get_google_access_token(google_account)
-#             if not access_token:
-#                 return Response(
-#                     {"error": "Unable to get access token"}, 
-#                     status=status.HTTP_400_BAD_REQUEST
-#                 )
+        # Create Google Calendar event
+        google_account = GoogleAccount.objects.filter(company=company).first()
+        if google_account:
+            access_token = get_google_access_token(google_account)
+            if not access_token:
+                return Response(
+                    {"error": "Unable to get access token"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
             
-#             # Prepare event data with proper timezone
-#             event_data = {
-#                 "summary": booking.title,
-#                 "description": booking.notes or "",
-#                 "start": {
-#                     "dateTime": booking.start_time.isoformat(),
-#                     "timeZone": "UTC"  # Since we're storing in UTC
-#                 },
-#                 "end": {
-#                     "dateTime": (booking.end_time or booking.start_time).isoformat(),
-#                     "timeZone": "UTC"
-#                 },
-#                 "location": booking.location or "",
-#                 "attendees": [{"email": booking.client}] if booking.client else [],
-#             }
+            # Prepare event data with proper timezone
+            event_data = {
+                "summary": booking.title,
+                "description": booking.notes or "",
+                "start": {
+                    "dateTime": booking.start_time.isoformat(),
+                    "timeZone": "UTC"  # Since we're storing in UTC
+                },
+                "end": {
+                    "dateTime": (booking.end_time or booking.start_time).isoformat(),
+                    "timeZone": "UTC"
+                },
+                "location": booking.location or "",
+                "attendees": [{"email": booking.client}] if booking.client else [],
+            }
             
-#             headers = {"Authorization": f"Bearer {access_token}"}
-#             response = requests.post(
-#                 "https://www.googleapis.com/calendar/v3/calendars/primary/events",
-#                 headers=headers,
-#                 json=event_data
-#             )
+            headers = {"Authorization": f"Bearer {access_token}"}
+            response = requests.post(
+                "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+                headers=headers,
+                json=event_data
+            )
             
-#             if response.status_code in [200, 201]:
-#                 event = response.json()
-#                 booking.google_event_id = event.get("id")
-#                 booking.event_link = event.get("htmlLink")
-#                 booking.save()
+            if response.status_code in [200, 201]:
+                event = response.json()
+                booking.google_event_id = event.get("id")
+                booking.event_link = event.get("htmlLink")
+                booking.save()
         
-#         # Send confirmation SMS
-#         if number:
-#             # Convert UTC time back to local for display
-#             user_tz = parse_timezone_offset(tz_offset)
-#             start_local = booking.start_time.astimezone(user_tz)
+        # Send confirmation SMS
+        if number:
+            # Convert UTC time back to local for display
+            user_tz = parse_timezone_offset(tz_offset)
+            start_local = booking.start_time.astimezone(user_tz)
             
-#             text_message = (
-#                 f"Booking Confirmed ✓\n"
-#                 f"Title: {booking.title}\n"
-#                 f"Time: {start_local.strftime('%d %b %Y, %I:%M %p')}\n"
-#                 f"Location: {booking.location or 'N/A'}\n"
-#                 f"Event Link: {booking.event_link or 'N/A'}\n"
-#                 f"\n⏰ Reminder: 1 hour before"
-#             )
+            text_message = (
+                f"Booking Confirmed ✓\n"
+                f"Title: {booking.title}\n"
+                f"Time: {start_local.strftime('%d %b %Y, %I:%M %p')}\n"
+                f"Location: {booking.location or 'N/A'}\n"
+                f"Event Link: {booking.event_link or 'N/A'}\n"
+                f"\n⏰ Reminder: 1 hour before"
+            )
             
-#             send_via_webhook_style(number, text_message)
+            send_via_webhook_style(number, text_message)
         
-#         return Response(
-#             BookingSerializer(booking).data, 
-#             status=status.HTTP_201_CREATED
-#         )
-
-
+        return Response(
+            BookingSerializer(booking).data, 
+            status=status.HTTP_201_CREATED
+        )
 
 class DashboardView(APIView):
     permission_classes = [permissions.IsAuthenticated,IsEmployeeAndCanViewDashboard]
@@ -897,5 +895,3 @@ class GoogleOAuthCallbackView(APIView):
         return Response(
             {"message": "Google Calendar connected successfully!"}
         )
-
-

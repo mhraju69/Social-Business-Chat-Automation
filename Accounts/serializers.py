@@ -76,3 +76,8 @@ class ServiceSerializer(serializers.ModelSerializer):
         model = Service
         fields = ['id','name', 'description', 'price', 'start_time','end_time']
         read_only_fields = ['company']
+
+class EmployeeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Employee
+        fields = ['id','email','roles']

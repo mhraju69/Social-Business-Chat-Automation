@@ -17,8 +17,8 @@ urlpatterns = [
     path('company/service/', ServiceListCreateView.as_view(), name='service-list-create'),
     path('company/service/<int:pk>/', ServiceRetrieveUpdateDestroyView.as_view(), name='service-detail'),
     path('company/employee/', AddEmployeeView.as_view(), name='add-employee'),
-    path('company/employee/check-permissions/', GetPermissionsView.as_view(), name='employee-list'),
-    path('company/employee/update-permissions/', UpdatePermissionsView.as_view(), name='employee-list'),
+    path('company/employee/check-permissions/<int:employee_id>/', GetPermissionsView.as_view(), name='employee-list'),
+    path('company/employee/update-permissions/<int:employee_id>/', UpdatePermissionsView.as_view(), name='employee-list'),
     path('google/login/',SocialAuthCallbackView.as_view()),
     path('reset-password/',ResetPassword.as_view()),
 ]
