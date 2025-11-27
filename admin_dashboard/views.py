@@ -10,7 +10,7 @@ from Finance.models import Payment
 from Others.models import SupportTicket
 from django.db.models import Sum, Q
 from Others.serializers import SupportTicketSerializer
-from Accounts.serializers import UserSerializer
+from Accounts.serializers import CompanySerializer, UserSerializer
 from rest_framework.filters import OrderingFilter, SearchFilter
 from Accounts.permissions import IsAdmin
 
@@ -31,20 +31,24 @@ class DashboardView(generics.GenericAPIView):
             Q(status='open') | Q(status='in_progress')
         )
 
-        # Show chart data by month (month, users, revenue, cost)
-
+        # Show chart data for last 6 months
         chart_data = []
-        for month in range(1, 13):
-            month_name = datetime.date(1900, month, 1).strftime('%B')
-            month_users = User.objects.filter(date_joined__month=month).count()
-            month_revenue = Payment.objects.filter(created_at__month=month).aggregate(total_revenue=Sum('amount'))['total_revenue'] or 0
+        today = datetime.date.today()
+        for i in range(5, -1, -1):
+            month_date = today - datetime.timedelta(days=i*30)
+            month_name = month_date.strftime('%B')
+            month = month_date.month
+            year = month_date.year
+            month_users = User.objects.filter(date_joined__month=month, date_joined__year=year).count()
+            month_revenue = Payment.objects.filter(created_at__month=month, created_at__year=year).aggregate(total_revenue=Sum('amount'))['total_revenue'] or 0
             month_cost = 0  # Placeholder for cost calculation
             chart_data.append({
-            'month': month_name,
-            'users': month_users,
-            'revenue': month_revenue,
-            'cost': month_cost
+                'month': month_name,
+                'users': month_users,
+                'revenue': month_revenue,
+                'cost': month_cost
             })
+        
         response_data = {
             "totalUsers": total_user,
             "activeIntegrations": active_integrations,
@@ -156,3 +160,13 @@ class UserChannelsView(APIView):
         
         except User.DoesNotExist:
             return Response({"error": f"User with id {user_id} does not exist."}, status=404)
+
+
+class CompanyListView(generics.ListAPIView):
+    queryset = Company.objects.all()
+    serializer_class = CompanySerializer
+    permission_classes = [IsAdmin]
+
+    filter_backends = [SearchFilter, OrderingFilter]
+    search_fields = ['name', 'email', 'phone']
+    ordering_fields = ['created_at', 'name', 'email']
