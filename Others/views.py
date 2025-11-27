@@ -280,7 +280,7 @@ class DashboardView(APIView):
         chat_status = self.get_chat_channel_status(request.user)
 
         return Response({
-            "open_cha": open_chat_count,
+            "open_chat": open_chat_count,
             "today_payments": today_payments,
             "today_meetings": today_meetings,
              "channel_status": chat_status

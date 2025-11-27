@@ -67,9 +67,9 @@ class LoginSerializer(serializers.Serializer):
         if not user.check_password(password):
             raise serializers.ValidationError("Invalid email or password.")
         if not user.is_active:
-            otp = user.user_otp.first()
-            if otp and otp.is_expired():
-                send_otp(user.email, 'Login')
+            # otp = user.user_otp.first()
+            # if otp and otp.is_expired():
+            #     send_otp(user.email, 'Login')
             raise serializers.ValidationError("Account is not active. Please verify your email to activate your account.")
         # Generate JWT tokens
         refresh = RefreshToken.for_user(user)

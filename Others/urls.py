@@ -11,7 +11,7 @@ urlpatterns = [
     path('login/', LoginView.as_view(), name='login'),
     path('verify-otp/',VerifyOTP.as_view(), name="verify_otp"),
     path('dashboard/', DashboardView.as_view()),
-    # path('booking/<int:company_id>/', ClientBookingView.as_view()),
+    path('booking/<int:company_id>/', ClientBookingView.as_view()),
     # path("google/connect/", GoogleConnectView.as_view()),
     path("google/calander/connect/", SaveGoogleAccountView.as_view()),
     path("google/calander/callback/", GoogleOAuthCallbackView.as_view()),
