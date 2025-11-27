@@ -9,4 +9,6 @@ urlpatterns = [
     path('user-channels/<int:user_id>/', views.UserChannelsView.as_view(), name='user-channels'),
     path('approve-channel/', views.ApproveChannelsView.as_view(), name='approve-channels'),
     path('reject-channel/', views.RejectChannelsView.as_view(), name='reject-channel'),
+
+    path('companies/', views.CompanyListView.as_view(), name='company-list'),
 ]

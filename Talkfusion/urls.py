@@ -5,7 +5,7 @@ from Socials.views import *
 from Others.views import *
 from django.urls import path, include
 from django.views.generic import RedirectView
-    
+from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView  
 
 
 urlpatterns = [
@@ -21,6 +21,10 @@ urlpatterns = [
     path('connect/fb/', FacebookConnectView.as_view(),name='facebook_connect'),
     path('connect/ig/', InstagramConnectView.as_view(),name='instagram_connect'),
     path('', RedirectView.as_view(url='/admin/', permanent=False)),
-    path('api/admin/', include('admin_dashboard.urls'))
+    path('api/admin/', include('admin_dashboard.urls')),
+
+    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
+    path('api/docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('api/docs/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 
 ]
