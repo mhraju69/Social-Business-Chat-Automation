@@ -576,7 +576,38 @@ class AnalyticsView(generics.GenericAPIView):
             
         qs = self.filter_by_type(qs, msg_type)
 
-        return qs.count()
+        # Get total count
+        total_count = qs.count()
+        
+        # Get count per platform
+        platforms = qs.values("room__profile__platform").annotate(count=Count("id"))
+        
+        # Initialize result with 0 for all platforms
+        result = {
+            "whatsapp": {"count": 0, "percentage": 0.0},
+            "facebook": {"count": 0, "percentage": 0.0},
+            "instagram": {"count": 0, "percentage": 0.0}
+        }
+        
+        # Update with actual counts and calculate percentages
+        for p in platforms:
+            platform = p["room__profile__platform"]
+            count = p["count"]
+            percentage = round((count / total_count * 100), 2) if total_count > 0 else 0.0
+            result[platform] = {
+                "count": count,
+                "percentage": percentage
+            }
+        res = {
+            "whatsapp": result["whatsapp"]["percentage"],
+            "facebook": result["facebook"]["percentage"],
+            "instagram": result["instagram"]["percentage"]
+        }
+        
+        return {
+            "total": total_count,
+            "platforms": res
+        }
 
     def get_booking_count(self, request, company):
         qs = Booking.objects.filter(company=company)

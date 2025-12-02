@@ -57,12 +57,15 @@ def unified_webhook(request, platform):
                 text = msg.get("text", {}).get("body", "")
 
             elif platform == "facebook":
+                print(f"📘 [Facebook] Webhook received")
                 entry = data.get("entry", [])
                 if not entry:
+                    print(f"❌ [Facebook] No entry in webhook data")
                     return JsonResponse({"status": "no_entry"})
 
                 entry0 = entry[0]
                 profile_id = entry0.get("id")
+                print(f"📘 [Facebook] Profile ID: {profile_id}")
 
                 profile = ChatProfile.objects.filter(
                     platform="facebook",
@@ -70,15 +73,20 @@ def unified_webhook(request, platform):
                     bot_active=True
                 ).first()
                 if not profile:
+                    print(f"❌ [Facebook] No active profile found for {profile_id}")
                     return JsonResponse({"status": "no_profile"})
+                
+                print(f"✅ [Facebook] Profile found: {profile.name or profile.profile_id}, bot_active={profile.bot_active}")
 
                 messaging = entry0.get("messaging", [])
                 if not messaging:
+                    print(f"❌ [Facebook] No messaging array in webhook")
                     return JsonResponse({"status": "no_messaging"})
 
                 msg_event = messaging[0]
                 client_id = msg_event.get("sender", {}).get("id")
                 text = msg_event.get("message", {}).get("text", "")
+                print(f"📘 [Facebook] Message from {client_id}: {text}")
 
             elif platform == "instagram":
                 entry = data.get("entry", [])
@@ -128,6 +136,16 @@ def unified_webhook(request, platform):
             )
             room, _ = ChatRoom.objects.get_or_create(profile=profile, client=client_obj)
 
+            # CRITICAL FIX: Check for stuck state BEFORE updating the timestamp
+            # If is_waiting_reply is True but it's been a long time since the last message,
+            # it means the previous task failed or died. We must reset it.
+            if room.is_waiting_reply and room.last_incoming_time:
+                time_waiting = (timezone.now() - room.last_incoming_time).total_seconds()
+                if time_waiting > 30:  # If waiting for more than 30 seconds, it's definitely stuck
+                    print(f"⚠️ [{platform}] Room {room.id} stuck waiting for {time_waiting}s, forcing reset of is_waiting_reply")
+                    room.is_waiting_reply = False
+                    room.save(update_fields=["is_waiting_reply"])
+
             # Save incoming message
             ChatMessage.objects.create(room=room, type="incoming", text=text)
 
@@ -142,10 +160,29 @@ def unified_webhook(request, platform):
             # BATCH REPLY SYSTEM ACTIVATION
             #---------------------------------------------
 
-            if profile.bot_active and room.bot_active and not room.is_waiting_reply:
-                room.is_waiting_reply = True
-                room.save(update_fields=["is_waiting_reply"])
-                wait_and_reply.delay(room.id, delay=5)
+            # (Stuck check removed from here as it was ineffective)
+
+            # If already waiting, the existing task will see the new last_incoming_time
+            # and reschedule itself. We just need to ensure a task is scheduled.
+            if profile.bot_active and room.bot_active:
+                if not room.is_waiting_reply:
+                    print(f"🤖 [{platform}] Bot reply activated for room {room.id}")
+                    room.is_waiting_reply = True
+                    room.save(update_fields=["is_waiting_reply"])
+                    wait_and_reply.delay(room.id, delay=5)
+                    print(f"⏰ [{platform}] wait_and_reply task scheduled for room {room.id}")
+                else:
+                    print(f"⏳ [{platform}] Already waiting for reply on room {room.id}, existing task will reschedule itself")
+                
+                # Debug logging for Facebook
+                if platform == "facebook":
+                    print(f"🔍 [Facebook Debug] Room {room.id} state:")
+                    print(f"    - is_waiting_reply: {room.is_waiting_reply}")
+                    print(f"    - bot_active: {room.bot_active}")
+                    print(f"    - profile.bot_active: {profile.bot_active}")
+                    print(f"    - last_incoming_time: {room.last_incoming_time}")
+            else:
+                print(f"⏭️ [{platform}] Bot reply disabled - profile.bot_active={profile.bot_active}, room.bot_active={room.bot_active}")
             
 
         except Exception as e:
