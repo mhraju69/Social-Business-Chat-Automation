@@ -10,4 +10,5 @@ admin.site.register(Alert,ModelAdmin)
 admin.site.register(KnowledgeBase,ModelAdmin)
 admin.site.register(SupportTicket,ModelAdmin)
 admin.site.register(GoogleAccount,ModelAdmin)
+admin.site.register(UserSession,ModelAdmin)
 

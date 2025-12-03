@@ -1,8 +1,9 @@
 # serializers.py
-from rest_framework import serializers
 from .models import *
-# from Others.models import Company
-from .utils import send_otp
+from Others.models import *
+from .utils import *
+import user_agents, requests
+from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
 class UserSerializer(serializers.ModelSerializer):
@@ -54,6 +55,7 @@ class LoginSerializer(serializers.Serializer):
     def validate(self, data):
         email = data.get("email")
         password = data.get("password")
+        request = self.context.get('request')
 
         if not email or not password:
             raise serializers.ValidationError("Both email and password are required.")
@@ -73,11 +75,28 @@ class LoginSerializer(serializers.Serializer):
             raise serializers.ValidationError("Account is not active. Please verify your email to activate your account.")
         # Generate JWT tokens
         refresh = RefreshToken.for_user(user)
+        access = refresh.access_token
+        ua_string = request.META.get('HTTP_USER_AGENT', '')
 
+        user_agent = user_agents.parse(ua_string)
+        
+        # Debug: Print JTI being stored
+        jti_to_store = str(access['jti'])
+        print(f"\n[LoginSerializer] Creating session for {user.email}")
+        print(f"[LoginSerializer] JTI being stored in DB: {jti_to_store}")
+        UserSession.objects.create(
+            user=user,
+            device=user_agent.device.family,
+            browser=user_agent.browser.family,
+            ip_address=get_client_ip(request),
+            token=str(access['jti']),
+            location=get_location(get_client_ip(request))
+        )
+        print(f"[LoginSerializer] Returned access token JTI: {access['jti']}\n")
         return {
             "user": UserSerializer(user).data,
             "refresh": str(refresh),
-            "access": str(refresh.access_token),
+            "access": str(access),  # Use the same access token, not a new one!
         }  
     
 class CompanySerializer(serializers.ModelSerializer):

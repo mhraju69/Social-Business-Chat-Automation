@@ -1,4 +1,4 @@
-import logging
+import logging,requests
 from .models import *
 from django.conf import settings
 logger = logging.getLogger(__name__)
@@ -127,3 +127,16 @@ def send_employee_invitation(email, password, company_name,roles):
         msg.attach_alternative(html_content, "text/html")
         msg.send()
 
+def get_client_ip(request):
+    x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+    if x_forwarded_for:
+        return x_forwarded_for.split(',')[0]
+    return request.META.get('REMOTE_ADDR')
+
+def get_location(ip):
+    try:
+        url = f"http://ip-api.com/json/{ip}"
+        response = requests.get(url).json()
+        return f"{response['city']}, {response['country']}"
+    except:
+        return "Unknown"

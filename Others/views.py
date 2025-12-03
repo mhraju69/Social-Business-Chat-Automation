@@ -326,7 +326,7 @@ class UserActivityLogView(APIView):
         activities.sort(key=lambda x: x['timestamp'], reverse=True)
         
         # Return last 20 activities
-        serializer = ActivityLogSerializer(activities[:20], many=True)
+        serializer = ActivityLogSerializer(activities[:10], many=True)
         return Response(serializer.data)
     
     def get_activity_type(self, record):
@@ -926,3 +926,41 @@ class GoogleOAuthCallbackView(APIView):
         return Response(
             {"message": "Google Calendar connected successfully!"}
         )
+
+class ActiveSessionsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        sessions = UserSession.objects.filter(user=request.user)
+        data = [{
+            "device": s.device,
+            "browser": s.browser,
+            "ip": s.ip_address,
+            "last_active": s.last_active,
+            "session_id": s.id
+        } for s in list(reversed(sessions))[:5]]
+
+        return Response(data)
+
+class LogoutSessionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, session_id):
+        try:
+            session = UserSession.objects.get(id=session_id, user=request.user)
+            session.is_active = False
+            session.save()
+            return Response({"message": "Logout successful"})
+        except UserSession.DoesNotExist:
+            return Response({"error": "Session not found"}, status=status.HTTP_404_NOT_FOUND)
+
+class LogoutAllSessionsView(APIView):
+    permission_classes = [IsAuthenticated] 
+
+    def post(self, request):
+        try:
+            sessions = UserSession.objects.filter(user=request.user, is_active=True)
+            sessions.update(is_active=False)
+            return Response({"message": "Logout successful"})
+        except UserSession.DoesNotExist:
+            return Response({"error": "Session not found"}, status=status.HTTP_404_NOT_FOUND)

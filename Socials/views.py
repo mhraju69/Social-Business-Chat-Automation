@@ -22,7 +22,7 @@ def Connect(request):
     return render(request,'connect.html')
 
 class FacebookConnectView(APIView):
-    permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         fb_app_id = settings.FB_APP_ID
@@ -30,8 +30,8 @@ class FacebookConnectView(APIView):
         
         # ✅ Added pages_messaging permission
         scope = "pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging"
-        state = 1
-        # state = request.user.id
+        # state = 1
+        state = request.user.id
 
         fb_login_url = (
             f"https://www.facebook.com/v20.0/dialog/oauth"
@@ -217,8 +217,8 @@ def facebook_callback(request):
     })
 
 class InstagramConnectView(APIView):
-    permission_classes = [AllowAny]
-    # permission_classes = [IsAuthenticated]
+    # permission_classes = [AllowAny]
+    permission_classes = [IsAuthenticated]
 
     def get(self, request):
         """
@@ -227,8 +227,8 @@ class InstagramConnectView(APIView):
         fb_app_id = settings.FB_APP_ID
         redirect_uri = "https://ape-in-eft.ngrok-free.app/instagram/callback/"
         scope = "instagram_basic,instagram_manage_messages,pages_show_list,pages_manage_metadata"
-        state = 2
-        # state = request.user.id 
+        # state = 2
+        state = request.user.id 
 
         fb_login_url = (
             f"https://www.facebook.com/v20.0/dialog/oauth"
