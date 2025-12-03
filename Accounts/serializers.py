@@ -2,7 +2,7 @@
 from .models import *
 from Others.models import *
 from .utils import *
-import user_agents, requests
+import user_agents, requests,re
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
@@ -78,21 +78,20 @@ class LoginSerializer(serializers.Serializer):
         access = refresh.access_token
         ua_string = request.META.get('HTTP_USER_AGENT', '')
 
-        user_agent = user_agents.parse(ua_string)
+        print(f"☘️☘️☘️☘️☘️☘️User Agent: {ua_string}")
         
-        # Debug: Print JTI being stored
-        jti_to_store = str(access['jti'])
-        print(f"\n[LoginSerializer] Creating session for {user.email}")
-        print(f"[LoginSerializer] JTI being stored in DB: {jti_to_store}")
+        details = ua_string.split(",")
+        device = f"{details[0].strip()} {details[1].strip()}"
+        platform = details[2].strip()
+        
         UserSession.objects.create(
             user=user,
-            device=user_agent.device.family,
-            browser=user_agent.browser.family,
+            device=device,
+            browser=platform,
             ip_address=get_client_ip(request),
             token=str(access['jti']),
             location=get_location(get_client_ip(request))
         )
-        print(f"[LoginSerializer] Returned access token JTI: {access['jti']}\n")
         return {
             "user": UserSerializer(user).data,
             "refresh": str(refresh),

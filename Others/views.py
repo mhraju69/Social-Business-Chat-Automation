@@ -935,9 +935,10 @@ class ActiveSessionsView(APIView):
         data = [{
             "device": s.device,
             "browser": s.browser,
+            "location": s.location,
             "ip": s.ip_address,
             "last_active": s.last_active,
-            "session_id": s.id
+            "session_id": s.id,
         } for s in list(reversed(sessions))[:5]]
 
         return Response(data)
