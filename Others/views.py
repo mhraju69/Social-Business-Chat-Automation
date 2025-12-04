@@ -12,7 +12,7 @@ from rest_framework.exceptions import PermissionDenied
 import requests
 from django.utils import timezone
 import pytz
-from datetime import timedelta
+from datetime import timedelta, datetime
 from django.db.models import Sum,Count
 from Accounts.permissions import *
 from .helper import *
@@ -965,3 +965,95 @@ class LogoutAllSessionsView(APIView):
             return Response({"message": "Logout successful"})
         except UserSession.DoesNotExist:
             return Response({"error": "Session not found"}, status=status.HTTP_404_NOT_FOUND)
+
+class MonthlyBookingsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        try:
+            company = Company.objects.get(user=request.user)
+        except Company.DoesNotExist:
+            return Response(
+                {"error": "Company profile not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        tz_name = request.GET.get('timezone') or 'UTC'
+        try:
+            company_tz = pytz.timezone(tz_name)
+        except pytz.exceptions.UnknownTimeZoneError:
+            company_tz = pytz.UTC
+
+        now_utc = timezone.now()
+        now_local = now_utc.astimezone(company_tz)
+        try:
+            month = int(request.GET.get('month', now_local.month))
+            year = int(request.GET.get('year', now_local.year))
+        except (ValueError, TypeError):
+            return Response(
+                {"error": "Invalid month or year parameter"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if month < 1 or month > 12:
+            return Response(
+                {"error": "Month must be between 1 and 12"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Calculate start and end of the month in local timezone
+        start_of_month = company_tz.localize(
+            datetime(year, month, 1, 0, 0, 0)
+        )
+        
+        # Calculate end of month (start of next month)
+        if month == 12:
+            end_of_month = company_tz.localize(
+                datetime(year + 1, 1, 1, 0, 0, 0)
+            )
+        else:
+            end_of_month = company_tz.localize(
+                datetime(year, month + 1, 1, 0, 0, 0)
+            )
+
+        # Convert to UTC for database query
+        start_utc = start_of_month.astimezone(pytz.UTC)
+        end_utc = end_of_month.astimezone(pytz.UTC)
+
+        # Query bookings for the month
+        bookings_qs = Booking.objects.filter(
+            company=company,
+            start_time__gte=start_utc,
+            start_time__lt=end_utc
+        ).order_by('start_time')
+
+        # Prepare booking list with details
+        bookings_list = []
+        for booking in bookings_qs:
+            # Convert times to local timezone for display
+            start_local = booking.start_time.astimezone(company_tz)
+            end_local = booking.end_time.astimezone(company_tz) if booking.end_time else None
+
+            booking_data = {
+                "id": booking.id,
+                "title": booking.title,
+                "client": booking.client,
+                "start_time": start_local.strftime("%Y-%m-%d %H:%M:%S"),
+                "end_time": end_local.strftime("%Y-%m-%d %H:%M:%S") if end_local else None,
+                "location": booking.location,
+                "price": booking.price,
+                "notes": booking.notes,
+                "event_link": booking.event_link,
+                "google_event_id": booking.google_event_id,
+                "reminder_hours_before": booking.reminder_hours_before,
+                "created_at": booking.created_at.astimezone(company_tz).strftime("%Y-%m-%d %H:%M:%S")
+            }
+            bookings_list.append(booking_data)
+
+        return Response({
+            "month": month,
+            "year": year,
+            "timezone": tz_name,
+            "total_bookings": bookings_qs.count(),
+            "bookings": bookings_list
+        }, status=status.HTTP_200_OK)

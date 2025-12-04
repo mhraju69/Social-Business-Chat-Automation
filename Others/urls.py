@@ -24,5 +24,5 @@ urlpatterns = [
     path('knowledge-base/', KnowledgeBaseListCreateView.as_view(), name='knowledgebase-list-create'),
     path('knowledge-base/<int:id>/', KnowledgeBaseRetrieveUpdateDestroyView.as_view(), name='knowledgebase-detail'),
     path('finance-data/', FinanceDataView.as_view(), name='knowledgebase-list-create'),
-    
+    path('bookings/monthly/', MonthlyBookingsView.as_view(), name='monthly-bookings'),
 ]
