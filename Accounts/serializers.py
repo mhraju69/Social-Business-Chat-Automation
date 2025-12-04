@@ -2,7 +2,7 @@
 from .models import *
 from Others.models import *
 from .utils import *
-import user_agents, requests,re
+import requests,re
 from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 

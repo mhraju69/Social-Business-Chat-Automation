@@ -2,7 +2,7 @@ from rest_framework.response import Response
 from rest_framework import status,permissions,generics
 from rest_framework.views import APIView 
 from rest_framework.viewsets import ModelViewSet 
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated,AllowAny
 from .models import *
 from Finance.models import *
 from django.conf import settings
@@ -19,15 +19,32 @@ from .helper import *
 import urllib.parse
 
 def get_google_access_token(google_account):
+    """Get a fresh access token using the refresh token"""
+    if not google_account.refresh_token:
+        print("❌ No refresh token available")
+        return None
+        
     data = {
         "client_id": settings.GOOGLE_CLIENT_ID,
         "client_secret": settings.GOOGLE_CLIENT_SECRET,
         "refresh_token": google_account.refresh_token,
         "grant_type": "refresh_token",
     }
-    response = requests.post(google_account.token_uri, data=data)
-    result = response.json()
-    return result.get("access_token")
+    
+    try:
+        response = requests.post(google_account.token_uri, data=data)
+        result = response.json()
+        
+        if response.status_code == 200:
+            access_token = result.get("access_token")
+            print(f"✅ Got new access token: {access_token[:20]}...")
+            return access_token
+        else:
+            print(f"❌ Token refresh failed: {result}")
+            return None
+    except Exception as e:
+        print(f"❌ Exception refreshing token: {e}")
+        return None
 
 class ClientBookingView(APIView):
     def post(self, request, company_id):
@@ -41,50 +58,56 @@ class ClientBookingView(APIView):
         
         data = request.data.copy()
         number = data.get('number')
-        tz_offset = company.user.timezone or "+6"
         
-        # Convert local time to UTC
-        if 'start_time' in data:
-            start_time_local = data['start_time']  # "2025-11-21 06:06:00"
+        # Get timezone from params (e.g., "Asia/Dhaka" or "+06:00")
+        timezone_str = request.query_params.get('timezone') or request.data.get('timezone') or 'UTC'
+        
+        # Fix common timezone typos
+        if timezone_str == "Dhaka/Asia":
+            timezone_str = "Asia/Dhaka"
             
-            # Parse as naive datetime
+        try:
+            # Try to parse as timezone name first (e.g., "Asia/Dhaka")
+            user_tz = pytz.timezone(timezone_str)
+        except pytz.exceptions.UnknownTimeZoneError:
+            user_tz = pytz.UTC
+        
+        # Calculate UTC times for Google Calendar
+        calendar_start_utc = None
+        calendar_end_utc = None
+        
+        if 'start_time' in data:
+            start_time_local = data['start_time']
+            
             if isinstance(start_time_local, str):
-                start_dt = datetime.strptime(start_time_local, "%Y-%m-%d %H:%M:%S")
+                # Parse the datetime string
+                try:
+                    start_dt = datetime.strptime(start_time_local, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    # Try alternate format if needed, or let serializer handle validation later
+                    start_dt = datetime.strptime(start_time_local, "%Y-%m-%dT%H:%M:%S")
             else:
                 start_dt = start_time_local
             
-            # Get user timezone
-            offset_hours = float(tz_offset)
-            offset_minutes = int(offset_hours * 60)
-            user_tz = pytz.FixedOffset(offset_minutes)
-            
-            # Localize to user timezone
+            # Localize to user timezone and convert to UTC for Calendar
             start_aware = user_tz.localize(start_dt)
+            calendar_start_utc = start_aware.astimezone(pytz.UTC)
             
-            # Convert to UTC
-            start_utc = start_aware.astimezone(pytz.UTC)
-            
-            print(f"📥 Input (local): {start_time_local}")
-            print(f"🌍 Timezone: {tz_offset}")
-            print(f"🌐 Saved (UTC): {start_utc}")
-            
-            data['start_time'] = start_utc
+            # Note: We do NOT update data['start_time'] so DB saves the raw input (as UTC/Naive)
         
         if 'end_time' in data:
             end_time_local = data['end_time']
             
             if isinstance(end_time_local, str):
-                end_dt = datetime.strptime(end_time_local, "%Y-%m-%d %H:%M:%S")
+                try:
+                    end_dt = datetime.strptime(end_time_local, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    end_dt = datetime.strptime(end_time_local, "%Y-%m-%dT%H:%M:%S")
             else:
                 end_dt = end_time_local
             
-            offset_hours = float(tz_offset)
-            offset_minutes = int(offset_hours * 60)
-            user_tz = pytz.FixedOffset(offset_minutes)
             end_aware = user_tz.localize(end_dt)
-            end_utc = end_aware.astimezone(pytz.UTC)
-            
-            data['end_time'] = end_utc
+            calendar_end_utc = end_aware.astimezone(pytz.UTC)
         
         # Create booking
         serializer = BookingSerializer(data=data)
@@ -93,53 +116,75 @@ class ClientBookingView(APIView):
         
         # Create Google Calendar event
         google_account = GoogleAccount.objects.filter(company=company).first()
+        calendar_error = None
+        
         if google_account:
-            access_token = get_google_access_token(google_account)
-            if not access_token:
-                return Response(
-                    {"error": "Unable to get access token"}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Prepare event data with proper timezone
-            event_data = {
-                "summary": booking.title,
-                "description": booking.notes or "",
-                "start": {
-                    "dateTime": booking.start_time.isoformat(),
-                    "timeZone": "UTC"  # Since we're storing in UTC
-                },
-                "end": {
-                    "dateTime": (booking.end_time or booking.start_time).isoformat(),
-                    "timeZone": "UTC"
-                },
-                "location": booking.location or "",
-                "attendees": [{"email": booking.client}] if booking.client else [],
-            }
-            
-            headers = {"Authorization": f"Bearer {access_token}"}
-            response = requests.post(
-                "https://www.googleapis.com/calendar/v3/calendars/primary/events",
-                headers=headers,
-                json=event_data
-            )
-            
-            if response.status_code in [200, 201]:
-                event = response.json()
-                booking.google_event_id = event.get("id")
-                booking.event_link = event.get("htmlLink")
-                booking.save()
+            try:
+                access_token = get_google_access_token(google_account)
+                if not access_token:
+                    calendar_error = "Unable to get access token from refresh token"
+                    print(f"❌ Google Calendar Error: {calendar_error}")
+                else:
+                    # Use the calculated UTC times for Google Calendar
+                    # We send timeZone="UTC" because we already converted to UTC
+                    
+                    start_val = calendar_start_utc if calendar_start_utc else booking.start_time
+                    end_val = calendar_end_utc if calendar_end_utc else (booking.end_time or booking.start_time)
+                    
+                    # Prepare event data
+                    event_data = {
+                        "summary": booking.title,
+                        "description": booking.notes or "",
+                        "start": {
+                            "dateTime": start_val.isoformat(),
+                            "timeZone": "UTC"
+                        },
+                        "end": {
+                            "dateTime": end_val.isoformat(),
+                            "timeZone": "UTC"
+                        },
+                        "location": booking.location or "",
+                        "attendees": [{"email": booking.client}] if booking.client else [],
+                    }
+                    
+                    print(f"📅 Creating Google Calendar event...")
+                    print(f"   Timezone: UTC (Converted from {timezone_str})")
+                    print(f"   Start: {start_val.isoformat()}")
+                    
+                    headers = {"Authorization": f"Bearer {access_token}"}
+                    response = requests.post(
+                        "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+                        headers=headers,
+                        json=event_data
+                    )
+                    
+                    print(f"   Response Status: {response.status_code}")
+                    
+                    if response.status_code in [200, 201]:
+                        event = response.json()
+                        booking.google_event_id = event.get("id")
+                        booking.event_link = event.get("htmlLink")
+                        booking.save()
+                        print(f"✅ Google Calendar event created: {booking.event_link}")
+                    else:
+                        calendar_error = response.json()
+                        print(f"❌ Google Calendar API Error: {calendar_error}")
+                        
+            except Exception as e:
+                calendar_error = str(e)
+                print(f"❌ Exception creating Google Calendar event: {e}")
+        else:
+            print("ℹ️ No Google Account found for this company")
         
         # Send confirmation SMS
         if number:
-            # Convert UTC time back to local for display
-            user_tz = parse_timezone_offset(tz_offset)
-            start_local = booking.start_time.astimezone(user_tz)
+            # Use the raw booking time (which matches input) for SMS
+            # No timezone conversion needed as requested
             
             text_message = (
                 f"Booking Confirmed ✓\n"
                 f"Title: {booking.title}\n"
-                f"Time: {start_local.strftime('%d %b %Y, %I:%M %p')}\n"
+                f"Time: {booking.start_time.strftime('%d %b %Y, %I:%M %p')}\n"
                 f"Location: {booking.location or 'N/A'}\n"
                 f"Event Link: {booking.event_link or 'N/A'}\n"
                 f"\n⏰ Reminder: 1 hour before"
@@ -851,15 +896,16 @@ class SaveGoogleAccountView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save(company=company)
 
-        redirect_uri = request.build_absolute_uri("/api/google/oauth/callback/")
+        redirect_uri = "https://ape-in-eft.ngrok-free.app/api/google/calendar/callback/"
 
         params = {
-            "client_id": google_account.GOOGLE_CLIENT_ID,
+            "client_id": settings.GOOGLE_CLIENT_ID,
             "redirect_uri": redirect_uri,
             "response_type": "code",
             "access_type": "offline",
             "prompt": "consent",
-            "scope": "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/userinfo.email"
+            "scope": "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/userinfo.email",
+            "state": str(request.user.id)  # Pass user ID through OAuth flow
         }
 
         auth_url = (
@@ -870,17 +916,35 @@ class SaveGoogleAccountView(APIView):
         return Response({"auth_url": auth_url}, status=status.HTTP_200_OK)
 
 class GoogleOAuthCallbackView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         code = request.query_params.get("code")
+        state = request.query_params.get("state")  # Get user ID from state
+        
         if not code:
             return Response(
                 {"error": "Missing authorization code"},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        company = Company.objects.filter(user=request.user).first()
+        if not state:
+            return Response(
+                {"error": "Missing state parameter"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Get user from state parameter
+        try:
+            user_id = int(state)
+            user = User.objects.get(id=user_id)
+        except (ValueError, User.DoesNotExist):
+            return Response(
+                {"error": "Invalid user"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        company = Company.objects.filter(user=user).first()
         if not company:
             return Response(
                 {"error": "Company not found"},
@@ -895,15 +959,15 @@ class GoogleOAuthCallbackView(APIView):
             )
 
         # Your redirect URL (must match the one used in SaveGoogleAccountView)
-        redirect_uri = request.build_absolute_uri("/api/google/oauth/callback/")
+        redirect_uri = "https://ape-in-eft.ngrok-free.app/api/google/calendar/callback/"
 
         token_url = "https://oauth2.googleapis.com/token"
 
         data = {
             "code": code,
-            "client_id": google_account.client_id,
-            "client_secret": google_account.client_secret,
-            "redirect_uri": redirect_uri,
+            "client_id": settings.GOOGLE_CLIENT_ID,
+            "client_secret": settings.GOOGLE_CLIENT_SECRET,
+            "redirect_uri": redirect_uri,           
             "grant_type": "authorization_code"
         }
 
