@@ -12,8 +12,7 @@ urlpatterns = [
     path('verify-otp/',VerifyOTP.as_view(), name="verify_otp"),
     path('dashboard/', DashboardView.as_view()),
     path('booking/<int:company_id>/', ClientBookingView.as_view()),
-    # path("google/connect/", GoogleConnectView.as_view()),
-    path("google/calendar/connect/", SaveGoogleAccountView.as_view()),
+    path("google/calendar/connect/", SaveGoogleCalendarView.as_view()),
     path("google/calendar/callback/", GoogleOAuthCallbackView.as_view()),
     path('analytics/', AnalyticsView.as_view(), name='analytics'),
     path('log/', UserActivityLogView.as_view(), name='user-activity-log'),
@@ -25,4 +24,5 @@ urlpatterns = [
     path('knowledge-base/<int:id>/', KnowledgeBaseRetrieveUpdateDestroyView.as_view(), name='knowledgebase-detail'),
     path('finance-data/', FinanceDataView.as_view(), name='knowledgebase-list-create'),
     path('bookings/monthly/', MonthlyBookingsView.as_view(), name='monthly-bookings'),
+    path('ai-training-files/', AITrainingFileBulkUploadView.as_view(), name='ai-training-files'),
 ]

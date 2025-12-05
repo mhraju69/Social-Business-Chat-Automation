@@ -115,7 +115,7 @@ class ClientBookingView(APIView):
         booking = serializer.save(company=company)
         
         # Create Google Calendar event
-        google_account = GoogleAccount.objects.filter(company=company).first()
+        google_account = GoogleCalendar.objects.filter(company=company).first()
         calendar_error = None
         
         if google_account:
@@ -304,13 +304,16 @@ class DashboardView(APIView):
         }
 
     def get_chat_channel_status(self, user):
-
+        company = Company.objects.filter(user=user).first()
+        calendar = GoogleCalendar.objects.filter(company=company).exists()
         platforms = ['whatsapp', 'facebook', 'instagram']
         status = {}
 
         for platform in platforms:
             exists = ChatProfile.objects.filter(user=user, platform=platform).exists()
             status[platform] = exists
+        
+        status['calendar'] = calendar
 
         return status
     
@@ -328,7 +331,7 @@ class DashboardView(APIView):
             "open_chat": open_chat_count,
             "today_payments": today_payments,
             "today_meetings": today_meetings,
-             "channel_status": chat_status
+            "channel_status": chat_status
         })
     
 class UserActivityLogView(APIView):
@@ -876,7 +879,7 @@ class SupportTicketViewSet(ModelViewSet):
             )
         return super().update(request, *args, **kwargs)
     
-class SaveGoogleAccountView(APIView):
+class SaveGoogleCalendarView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
@@ -886,9 +889,9 @@ class SaveGoogleAccountView(APIView):
                 {"error": "Company not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
-        google_account, _ = GoogleAccount.objects.get_or_create(company=company)
+        google_account, _ = GoogleCalendar.objects.get_or_create(company=company)
 
-        serializer = GoogleAccountSerializer(
+        serializer = GoogleCalendarSerializer(
             google_account,
             data=request.data,
             partial=True
@@ -951,10 +954,10 @@ class GoogleOAuthCallbackView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        google_account = GoogleAccount.objects.filter(company=company).first()
-        if not google_account:
+        google_calendar = GoogleCalendar.objects.filter(company=company).first()
+        if not google_calendar:
             return Response(
-                {"error": "Google account not initialized"},
+                {"error": "Google calendar not initialized"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -1121,3 +1124,32 @@ class MonthlyBookingsView(APIView):
             "total_bookings": bookings_qs.count(),
             "bookings": bookings_list
         }, status=status.HTTP_200_OK)
+
+class AITrainingFileBulkUploadView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        company = Company.objects.filter(user=request.user).first()
+        if not company:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        files = request.FILES.getlist('files')
+        if not files:
+            return Response({"error": "No files provided"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        created_files = []
+        for file in files:
+            ai_file = AITrainingFile.objects.create(company=company, file=file)
+            created_files.append(ai_file)
+            
+        serializer = AITrainingFileSerializer(created_files, many=True)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    def get(self, request):
+        company = Company.objects.filter(user=request.user).first()
+        if not company:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+        files = AITrainingFile.objects.filter(company=company)
+        serializer = AITrainingFileSerializer(files, many=True)
+        return Response(serializer.data)

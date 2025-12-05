@@ -98,7 +98,7 @@ class FAQ(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
-class GoogleAccount(models.Model):
+class GoogleCalendar(models.Model):
     company = models.OneToOneField(Company, on_delete=models.CASCADE, related_name='google_account')
     access_token = models.TextField(blank=True,null=True)
     refresh_token = models.TextField(blank=True,null=True)
@@ -223,3 +223,11 @@ class UserSession(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.device}"
+
+class AITrainingFile(models.Model):
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='ai_training_files')
+    file = models.FileField(upload_to='ai_training_files/')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.company.name} - {self.file.name}"

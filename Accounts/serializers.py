@@ -80,10 +80,11 @@ class LoginSerializer(serializers.Serializer):
 
         print(f"☘️☘️☘️☘️☘️☘️User Agent: {ua_string}")
         
-        details = ua_string.split(",")
-        device = f"{details[0].strip()} {details[1].strip()}"
-        platform = details[2].strip()
-        
+        # details = ua_string.split(",")
+        # device = f"{details[0].strip()} {details[1].strip()}"
+        # platform = details[2].strip()
+        device = "Desktop"
+        platform = "Desktop"
         UserSession.objects.create(
             user=user,
             device=device,

@@ -43,9 +43,9 @@ class KnowledgeBaseSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['user']
 
-class GoogleAccountSerializer(serializers.ModelSerializer):
+class GoogleCalendarSerializer(serializers.ModelSerializer):
     class Meta:
-        model = GoogleAccount
+        model = GoogleCalendar
         fields = '__all__'
         read_only_fields = ['company']
 
@@ -74,3 +74,9 @@ class SupportTicketSerializer(serializers.ModelSerializer):
             return f"{minutes} minutes ago"
         else:
             return "Just now"
+
+class AITrainingFileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AITrainingFile
+        fields = '__all__'
+        read_only_fields = ['company', 'uploaded_at']
