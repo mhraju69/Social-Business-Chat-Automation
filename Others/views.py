@@ -17,6 +17,7 @@ from django.db.models import Sum,Count
 from Accounts.permissions import *
 from .helper import *
 import urllib.parse
+from django.shortcuts import render
 
 def get_google_access_token(google_account):
     """Get a fresh access token using the refresh token"""
@@ -879,11 +880,12 @@ class SupportTicketViewSet(ModelViewSet):
             )
         return super().update(request, *args, **kwargs)
     
-class SaveGoogleCalendarView(APIView):
+class ConnectGoogleCalendarView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         company = Company.objects.filter(user=request.user).first()
+        method = request.data.get("from", "web")
         if not company:
             return Response(
                 {"error": "Company not found"},
@@ -908,7 +910,9 @@ class SaveGoogleCalendarView(APIView):
             "access_type": "offline",
             "prompt": "consent",
             "scope": "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/userinfo.email",
-            "state": str(request.user.id)  # Pass user ID through OAuth flow
+            "state":f"{request.user.id}" ,
+            "from":method
+
         }
 
         auth_url = (
@@ -924,7 +928,7 @@ class GoogleOAuthCallbackView(APIView):
     def get(self, request):
         code = request.query_params.get("code")
         state = request.query_params.get("state")  # Get user ID from state
-        
+        method = request.query_params.get("from")
         if not code:
             return Response(
                 {"error": "Missing authorization code"},
@@ -985,11 +989,16 @@ class GoogleOAuthCallbackView(APIView):
         token_data = response.json()
 
         # Save tokens
-        google_account.access_token = token_data.get("access_token")
-        google_account.refresh_token = token_data.get("refresh_token", google_account.refresh_token)
-        google_account.scopes = ["https://www.googleapis.com/auth/calendar"]
-        google_account.save()
+        google_calendar.access_token = token_data.get("access_token")
+        google_calendar.refresh_token = token_data.get("refresh_token", google_calendar.refresh_token)
+        google_calendar.scopes = ["https://www.googleapis.com/auth/calendar"]
+        google_calendar.save()
 
+        # return Response(
+        #     {"message": "Google Calendar connected successfully!"}
+        # )
+        if method == "app":
+            return render(request, 'redirect.html')
         return Response(
             {"message": "Google Calendar connected successfully!"}
         )
@@ -1056,9 +1065,11 @@ class MonthlyBookingsView(APIView):
         try:
             month = int(request.GET.get('month', now_local.month))
             year = int(request.GET.get('year', now_local.year))
+            day_param = request.GET.get('day')
+            day = int(day_param) if day_param else None
         except (ValueError, TypeError):
             return Response(
-                {"error": "Invalid month or year parameter"}, 
+                {"error": "Invalid date parameters"}, 
                 status=status.HTTP_400_BAD_REQUEST
             )
 
@@ -1068,24 +1079,38 @@ class MonthlyBookingsView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Calculate start and end of the month in local timezone
-        start_of_month = company_tz.localize(
-            datetime(year, month, 1, 0, 0, 0)
-        )
-        
-        # Calculate end of month (start of next month)
-        if month == 12:
-            end_of_month = company_tz.localize(
-                datetime(year + 1, 1, 1, 0, 0, 0)
-            )
+        if day:
+            try:
+                # Calculate start and end of the day in local timezone
+                start_local = company_tz.localize(
+                    datetime(year, month, day, 0, 0, 0)
+                )
+                # End of day is start of next day
+                end_local = start_local + timedelta(days=1)
+            except ValueError:
+                return Response(
+                    {"error": "Invalid day for given month and year"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
         else:
-            end_of_month = company_tz.localize(
-                datetime(year, month + 1, 1, 0, 0, 0)
+            # Calculate start and end of the month in local timezone
+            start_local = company_tz.localize(
+                datetime(year, month, 1, 0, 0, 0)
             )
+            
+            # Calculate end of month (start of next month)
+            if month == 12:
+                end_local = company_tz.localize(
+                    datetime(year + 1, 1, 1, 0, 0, 0)
+                )
+            else:
+                end_local = company_tz.localize(
+                    datetime(year, month + 1, 1, 0, 0, 0)
+                )
 
         # Convert to UTC for database query
-        start_utc = start_of_month.astimezone(pytz.UTC)
-        end_utc = end_of_month.astimezone(pytz.UTC)
+        start_utc = start_local.astimezone(pytz.UTC)
+        end_utc = end_local.astimezone(pytz.UTC)
 
         # Query bookings for the month
         bookings_qs = Booking.objects.filter(
@@ -1118,6 +1143,7 @@ class MonthlyBookingsView(APIView):
             bookings_list.append(booking_data)
 
         return Response({
+            "day": day,
             "month": month,
             "year": year,
             "timezone": tz_name,
