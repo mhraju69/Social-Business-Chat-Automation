@@ -10,11 +10,15 @@ from django.conf import settings
 from django.views.decorators.csrf import csrf_exempt
 from django.db import transaction
 from django.utils import timezone
+from datetime import timedelta
 import stripe
 from rest_framework.decorators import api_view,permission_classes
 from Socials.consumers import send_alert
 from decimal import Decimal
 from .helper import *
+import logging
+
+logger = logging.getLogger(__name__)
 # Create your views here.
 
 class StripeListCreateView(generics.ListCreateAPIView):
@@ -111,6 +115,8 @@ def stripe_webhook(request):
     payload = request.body
     sig_header = request.META.get('HTTP_STRIPE_SIGNATURE', '')
 
+    logger.info(f"Received webhook event with signature: {sig_header[:20]}...")
+
     # Collect all webhook secrets
     webhook_secrets = [settings.STRIPE_WEBHOOK_SECRET]
     webhook_secrets += list(
@@ -121,15 +127,17 @@ def stripe_webhook(request):
     for secret in webhook_secrets:
         try:
             event = stripe.Webhook.construct_event(payload, sig_header, secret)
+            logger.info(f"✅ Webhook verified with secret: {secret[:10]}...")
             break
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Failed to verify with secret {secret[:10]}...: {str(e)}")
             continue
 
     if not event:
-        print("❌ Invalid Stripe signature for all known secrets.")
+        logger.error("❌ Invalid Stripe signature for all known secrets.")
         return HttpResponse(status=400)
 
-    print("✅ Verified event:", event['type'])
+    logger.info(f"✅ Verified event: {event['type']}")
 
     data = event['data']['object']
     metadata = data.get('metadata', {})
@@ -139,68 +147,91 @@ def stripe_webhook(request):
     company_id = metadata.get('company_id')
     plan_id = metadata.get('plan_id')
 
+    logger.info(f"Webhook metadata - payment_id: {payment_id}, company_id: {company_id}, plan_id: {plan_id}")
+
     # Fetch objects
     payment = Payment.objects.filter(id=payment_id).first()
     company = Company.objects.filter(id=company_id).first()
-    plan = Plan.objects.filter(id=plan_id).first()
+    plan = Plan.objects.filter(id=plan_id).first() if plan_id else None
 
     # Validate
     if not payment:
-        print("❌ Payment not found in webhook metadata.")
+        logger.error(f"❌ Payment not found with ID: {payment_id}")
         return HttpResponse(status=400)
 
+    logger.info(f"Found payment: ID={payment.id}, Type={payment.type}, Current Status={payment.status}")
+
     if payment.type == "subscriptions" and not (company and plan):
-        print("❌ Missing company or plan for subscription payment.")
+        logger.error(f"❌ Missing company or plan for subscription payment. Company: {company}, Plan: {plan}")
         return HttpResponse(status=400)
 
     # ----------------------------------------------------------------------
     # ✔ SUCCESSFUL PAYMENT
     # ----------------------------------------------------------------------
     if event['type'] == 'checkout.session.completed':
-        payment.status = "success"
-        payment.payment_date = timezone.now()
-        payment.transaction_id = data.get('id')
-        payment.save()
+        try:
+            with transaction.atomic():
+                # Update payment status
+                payment.status = "success"
+                payment.payment_date = timezone.now()
+                payment.transaction_id = data.get('id')
+                payment.save()
+                
+                logger.info(f"✅ Payment {payment.id} status updated to SUCCESS")
 
-        # =================== SUBSCRIPTION PAYMENT =========================
-        if payment.type == "subscriptions":
+                # =================== SUBSCRIPTION PAYMENT =========================
+                if payment.type == "subscriptions":
+                    logger.info(f"Processing subscription payment for company: {company.id}")
 
-            # Create or update subscription
-            subscription, created = Subscriptions.objects.get_or_create(
-                company=company,
-                defaults={
-                    "plan": plan,
-                }
-            )
+                    # Create or update subscription
+                    subscription, created = Subscriptions.objects.get_or_create(
+                        company=company,
+                        defaults={
+                            "plan": plan,
+                        }
+                    )
 
-            if not created:
-                # Subscription already exists → upgrade/renew
-                subscription.plan = plan
-                subscription.start = timezone.now()
+                    if not created:
+                        # Subscription already exists → upgrade/renew
+                        subscription.plan = plan
+                        subscription.start = timezone.now()
+                        logger.info(f"Updated existing subscription {subscription.id}")
+                    else:
+                        logger.info(f"Created new subscription {subscription.id}")
 
-            # Set end date automatically from plan duration
-            if hasattr(plan, "duration_days"):
-                subscription.end = subscription.start + timedelta(days=plan.duration_days)
+                    # Set end date automatically from plan duration
+                    if hasattr(plan, "duration_days"):
+                        subscription.end = subscription.start + timedelta(days=plan.duration_days)
 
-            subscription.save()
+                    subscription.save()
 
-            # Notify admins
-            for admin in User.objects.filter(is_staff=True):
-                send_alert(
-                    admin,
-                    "New subscription payment",
-                    f"{payment.amount} USD received for subscription plan from {payment.company.user.email}",
-                    "info"
-                )
+                    # Notify admins
+                    for admin in User.objects.filter(is_staff=True):
+                        send_alert(
+                            admin,
+                            "New subscription payment",
+                            f"{payment.amount} USD received for {plan.get_name_display()} plan from {payment.company.user.email}",
+                            "info"
+                        )
+                    
+                    logger.info(f"✅ Subscription payment processed successfully")
 
-        # =================== SERVICE PAYMENT =============================
-        else:
-            send_alert(
-                payment.company.user,
-                "New service payment",
-                f"{payment.amount} USD received for {payment.reason}",
-                "info"
-            )
+                # =================== SERVICE PAYMENT =============================
+                else:
+                    logger.info(f"Processing service payment for company: {company.id}")
+                    
+                    send_alert(
+                        payment.company.user,
+                        "Payment Received",
+                        f"{payment.amount} USD received for {payment.reason}",
+                        "info"
+                    )
+                    
+                    logger.info(f"✅ Service payment processed successfully")
+
+        except Exception as e:
+            logger.error(f"❌ Error processing successful payment: {str(e)}", exc_info=True)
+            return HttpResponse(status=500)
 
     # ----------------------------------------------------------------------
     # ❌ FAILED PAYMENT
@@ -210,25 +241,32 @@ def stripe_webhook(request):
         'charge.failed',
         'checkout.session.async_payment_failed'
     ]:
-        payment.status = "failed"
-        payment.payment_date = timezone.now()
-        payment.save()
+        try:
+            with transaction.atomic():
+                payment.status = "failed"
+                payment.payment_date = timezone.now()
+                payment.save()
+                
+                logger.warning(f"⚠️ Payment {payment.id} marked as FAILED")
 
-        if payment.type == "subscriptions":
-            for admin in User.objects.filter(is_staff=True):
-                send_alert(
-                    admin,
-                    "Subscription payment failed",
-                    f"{payment.amount} USD payment failed for subscription from {payment.company.user.email}",
-                    "warning"
-                )
-        else:
-            send_alert(
-                payment.company.user,
-                "Service payment failed",
-                f"{payment.amount} USD payment failed for {payment.reason}",
-                "warning"
-            )
+                if payment.type == "subscriptions":
+                    for admin in User.objects.filter(is_staff=True):
+                        send_alert(
+                            admin,
+                            "Subscription payment failed",
+                            f"{payment.amount} USD payment failed for subscription from {payment.company.user.email}",
+                            "warning"
+                        )
+                else:
+                    send_alert(
+                        payment.company.user,
+                        "Payment Failed",
+                        f"{payment.amount} USD payment failed for {payment.reason}",
+                        "warning"
+                    )
+        except Exception as e:
+            logger.error(f"❌ Error processing failed payment: {str(e)}", exc_info=True)
+            return HttpResponse(status=500)
 
     return HttpResponse(status=200)
 
