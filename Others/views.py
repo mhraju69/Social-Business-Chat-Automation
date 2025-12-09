@@ -1179,3 +1179,83 @@ class AITrainingFileBulkUploadView(APIView):
         files = AITrainingFile.objects.filter(company=company)
         serializer = AITrainingFileSerializer(files, many=True)
         return Response(serializer.data)
+
+class BookingDaysView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get(self, request):
+        company = Company.objects.filter(user=request.user).first()
+        if not company:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get timezone
+        tz_name = request.GET.get('timezone') or 'UTC'
+        try:
+            company_tz = pytz.timezone(tz_name)
+        except pytz.exceptions.UnknownTimeZoneError:
+            company_tz = pytz.UTC
+
+        # Get current time in company timezone
+        now_utc = timezone.now()
+        now_local = now_utc.astimezone(company_tz)
+        
+        # Get month and year from query params
+        try:
+            month = int(request.GET.get('month', now_local.month))
+            year = int(request.GET.get('year', now_local.year))
+        except (ValueError, TypeError):
+            return Response(
+                {"error": "Invalid month or year parameters"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate month
+        if month < 1 or month > 12:
+            return Response(
+                {"error": "Month must be between 1 and 12"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Calculate start and end of the month in local timezone
+        start_local = company_tz.localize(
+            datetime(year, month, 1, 0, 0, 0)
+        )
+        
+        # Calculate end of month (start of next month)
+        if month == 12:
+            end_local = company_tz.localize(
+                datetime(year + 1, 1, 1, 0, 0, 0)
+            )
+        else:
+            end_local = company_tz.localize(
+                datetime(year, month + 1, 1, 0, 0, 0)
+            )
+
+        # Convert to UTC for database query
+        start_utc = start_local.astimezone(pytz.UTC)
+        end_utc = end_local.astimezone(pytz.UTC)
+
+        # Query bookings for the month
+        bookings_qs = Booking.objects.filter(
+            company=company,
+            start_time__gte=start_utc,
+            start_time__lt=end_utc
+        )
+
+        # Extract unique days from bookings
+        booking_days = set()
+        for booking in bookings_qs:
+            # Convert booking time to local timezone
+            booking_local = booking.start_time.astimezone(company_tz)
+            # Add the day to the set
+            booking_days.add(booking_local.day)
+
+        # Convert set to sorted list
+        days_list = sorted(list(booking_days))
+
+        return Response({
+            "month": month,
+            "year": year,
+            "timezone": tz_name,
+            "days": days_list
+        }, status=status.HTTP_200_OK)
