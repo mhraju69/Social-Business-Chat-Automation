@@ -65,6 +65,7 @@ INSTALLED_APPS = [
     'Socials',
     'Finance',
     'admin_dashboard',
+    'Ai',
 ]
 
 MIDDLEWARE = [

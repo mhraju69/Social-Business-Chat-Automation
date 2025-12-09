@@ -910,9 +910,7 @@ class ConnectGoogleCalendarView(APIView):
             "access_type": "offline",
             "prompt": "consent",
             "scope": "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/userinfo.email",
-            "state":f"{request.user.id}" ,
-            "from":method
-
+            "state":f"{request.user.id}_{method}",
         }
 
         auth_url = (
@@ -927,8 +925,8 @@ class GoogleOAuthCallbackView(APIView):
 
     def get(self, request):
         code = request.query_params.get("code")
-        state = request.query_params.get("state")  # Get user ID from state
-        method = request.query_params.get("from")
+        state = request.query_params.get("state")
+        
         if not code:
             return Response(
                 {"error": "Missing authorization code"},
@@ -941,9 +939,15 @@ class GoogleOAuthCallbackView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        # Get user from state parameter
+        # Parse state parameter (format: "user_id_method")
         try:
-            user_id = int(state)
+            if "_" in state:
+                user_id_str, method = state.split("_", 1)
+                user_id = int(user_id_str)
+            else:
+                user_id = int(state)
+                method = "web"
+
             user = User.objects.get(id=user_id)
         except (ValueError, User.DoesNotExist):
             return Response(
