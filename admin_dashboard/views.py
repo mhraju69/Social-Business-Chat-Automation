@@ -13,10 +13,46 @@ from Others.serializers import SupportTicketSerializer
 from Accounts.serializers import CompanySerializer, UserSerializer
 from rest_framework.filters import OrderingFilter, SearchFilter
 from Accounts.permissions import IsAdmin
-
+from drf_spectacular.utils import extend_schema_view, extend_schema, inline_serializer
+from rest_framework import serializers
 class DashboardView(generics.GenericAPIView):
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Get admin dashboard statistics",
+        responses={
+            200: {
+                "type": "object",
+                "properties": {
+                    "totalUsers": {"type": "integer"},
+                    "activeIntegrations": {"type": "integer"},
+                    "newCompanies": {"type": "integer"},
+                    "addIncome": {"type": "number"},
+                    "netProfit": {"type": "number"},
+                    "costs": {"type": "number"},
+                    "openTickets": {
+                        "type": "array",
+                        "items": {
+                            "type": "object"
+                        },
+                    },
+                    "chartData": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "month": {"type": "string"},
+                                "users": {"type": "integer"},
+                                "revenue": {"type": "number"},
+                                "cost": {"type": "number"},
+                            },
+                        },
+                    },
+                },
+            }
+        }   
+    )
     def get(self, request, *args, **kwargs):
         total_user = User.objects.count()
         active_integrations = ChatProfile.objects.filter(bot_active=True).count()
@@ -61,7 +97,13 @@ class DashboardView(generics.GenericAPIView):
 
         }
         return Response(response_data)
-    
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Get list of users with search and ordering",
+    )
+)
 class UserListView(generics.ListAPIView):
     queryset = User.objects.all()
     serializer_class = UserSerializer
@@ -75,6 +117,30 @@ class UserListView(generics.ListAPIView):
 class EnableChannelsView(APIView):
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Enable channels for all users",
+        request=inline_serializer(
+            name="EnableChannelsRequest",
+            fields={
+                "channel_name": serializers.CharField()
+            }
+        ),
+        responses={
+            200: {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string"},
+                },
+            },
+            400: {
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string"},
+                },
+            },
+        }
+    )
     def post(self, request, *args, **kwargs):
         channel_name = request.data.get("channel_name")
 
@@ -91,6 +157,36 @@ class EnableChannelsView(APIView):
 class DisableChannelsView(APIView):
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Disable channels for all users",
+        request=inline_serializer(
+            name="DisableChannelsRequest",
+            fields={
+                "channel_name": serializers.CharField()
+            }
+        ),
+        responses={
+            200: {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string"},
+                },
+            },
+            400: {
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string"},
+                },
+            },
+            404: {
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string"},
+                },
+            },
+        }
+    )
     def post(self, request, *args, **kwargs):
         channel_name = request.data.get("channel_name")
 
@@ -107,6 +203,36 @@ class DisableChannelsView(APIView):
 class ApproveChannelsView(APIView):
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Approve a chat profile",
+        request=inline_serializer(
+            name="ApproveChannelsRequest",
+            fields={
+                "chat_profile_id": serializers.IntegerField()
+            }
+        ),
+        responses={
+            200: {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string"},
+                },
+            },
+            400: {
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string"},
+                },
+            },
+            404: {
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string"},
+                },
+            },
+        }
+    )
     def post(self, request, *args, **kwargs):
         chat_profile_id = request.data.get("chat_profile_id")
 
@@ -125,6 +251,36 @@ class ApproveChannelsView(APIView):
 class RejectChannelsView(APIView):
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Reject a chat profile",
+        request=inline_serializer(
+            name="RejectChannelsRequest",
+            fields={
+                "chat_profile_id": serializers.IntegerField()
+            }
+        ),
+        responses={
+            200: {
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string"},
+                },
+            },
+            400: {
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string"},
+                },
+            },
+            404: {
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string"},
+                },
+            },
+        }
+    )
     def post(self, request, *args, **kwargs):
         chat_profile_id = request.data.get("chat_profile_id")
 
@@ -142,6 +298,25 @@ class RejectChannelsView(APIView):
 class UserChannelsView(APIView):
     permission_classes = [IsAdmin]
 
+    @extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Get all chat profiles for a specific user",
+        request=inline_serializer(
+            name="UserChannelsRequest",
+            fields={
+                "user_id": serializers.IntegerField()
+            }
+        ),
+        responses=inline_serializer(
+            name="UserChannelsResponse",
+            fields={
+                "user_id": serializers.IntegerField(),
+                "channels": serializers.ListField(
+                    child=serializers.DictField()
+                )
+            }
+        ),
+    )
     def get(self, request, user_id, *args, **kwargs):
         try:
             user = User.objects.get(id=user_id)
@@ -162,6 +337,12 @@ class UserChannelsView(APIView):
             return Response({"error": f"User with id {user_id} does not exist."}, status=404)
 
 
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Get list of companies with search and ordering",
+    )
+)
 class CompanyListView(generics.ListAPIView):
     queryset = Company.objects.all()
     serializer_class = CompanySerializer
