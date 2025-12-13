@@ -103,7 +103,7 @@ class LoginSerializer(serializers.Serializer):
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = Company
-        fields = "__all__"
+        exclude = ["refresh_token"]
         
         read_only_fields = ['user']
 

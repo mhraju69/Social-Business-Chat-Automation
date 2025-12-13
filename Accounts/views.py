@@ -1,4 +1,5 @@
 # views.py
+import drf_spectacular
 from rest_framework import viewsets, permissions, status , generics, decorators
 from rest_framework.response import Response
 from .utils import *
@@ -12,7 +13,9 @@ from .permissions import *
 from django.core.files.base import ContentFile
 from django.contrib.auth.hashers import make_password
 from django.utils.text import slugify
-import string,random
+import random
+import string
+from drf_spectacular.utils import extend_schema
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -85,6 +88,12 @@ class GetOtp(APIView):
 class LoginView(APIView):
     permission_classes = [permissions.AllowAny]
 
+    @extend_schema(
+        tags=["Authentication"],
+        summary="User login",
+        request=LoginSerializer,
+        responses={200: LoginSerializer}
+    )
     def post(self, request, *args, **kwargs):
         serializer = LoginSerializer(data=request.data,context={'request': request})        
         if serializer.is_valid():
