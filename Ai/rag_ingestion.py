@@ -44,7 +44,11 @@ COLLECTION_NAME = "company_knowledge"
 def get_qdrant_client():
     if not QDRANT_API_KEY:
         logger.warning("QDRANT_API_KEY is not set. Connection might fail.")
-    return QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
+    return QdrantClient(
+        url=QDRANT_URL, 
+        api_key=QDRANT_API_KEY,
+        timeout=120  # Increase timeout to 120 seconds
+    )
 
 def get_embedding_model():
     if not OPENAI_API_KEY:
@@ -137,6 +141,23 @@ def ensure_collection_exists(client: QdrantClient, vector_size: int = 1536):
             )
         )
         logger.info(f"Created collection {COLLECTION_NAME}")
+        
+    # Ensure Index on company_id
+    try:
+        client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="company_id",
+            field_schema=rest.PayloadSchemaType.INTEGER
+        )
+        # Also index source_id
+        client.create_payload_index(
+            collection_name=COLLECTION_NAME,
+            field_name="source_id",
+            field_schema=rest.PayloadSchemaType.KEYWORD
+        )
+    except Exception as e:
+        # Index might already exist
+        pass
 
 def process_company_knowledge(company_id: int):
     """
@@ -305,10 +326,25 @@ def process_company_knowledge(company_id: int):
             points.append(rest.PointStruct(id=point_id, vector=vector, payload=payload))
             
         if points:
-            client.upsert(
-                collection_name=COLLECTION_NAME,
-                points=points
-            )
+            # Batch upsert to avoid timeout on large uploads
+            batch_size = 100
+            total_batches = (len(points) + batch_size - 1) // batch_size
+            
+            logger.info(f"Upserting {len(points)} points for source {sid} in {total_batches} batch(es)")
+            
+            for batch_idx in range(0, len(points), batch_size):
+                batch = points[batch_idx:batch_idx + batch_size]
+                try:
+                    client.upsert(
+                        collection_name=COLLECTION_NAME,
+                        points=batch,
+                        wait=True  # Wait for operation to complete
+                    )
+                    logger.info(f"  Batch {batch_idx//batch_size + 1}/{total_batches} uploaded successfully")
+                except Exception as e:
+                    logger.error(f"  Failed to upsert batch {batch_idx//batch_size + 1}: {e}")
+                    # Continue with next batch instead of failing completely
+                    continue
             
     logger.info("Sync completed.")
 

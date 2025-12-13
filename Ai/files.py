@@ -11,9 +11,10 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "Talkfusion.settings")  # adjust
 # Initialize Django
 django.setup()
 
-from Accounts.models import User
-from Others.models import KnowledgeBase , AITrainingFile
+from Accounts.models import User,Service
+from Others.models import KnowledgeBase , AITrainingFile ,Booking , OpeningHours
 
-print(KnowledgeBase.objects.filter(user__id=1).values())
-print(AITrainingFile.objects.filter(company__id=2).values())
-print(AITrainingFile.objects.all().values())
+
+# print(KnowledgeBase.objects.filter(user__id=1).values())
+# print(AITrainingFile.objects.filter(company__id=2).values())
+# print(AITrainingFile.objects.all().values())

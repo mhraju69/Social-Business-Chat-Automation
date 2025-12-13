@@ -4,6 +4,7 @@ from .models import *
 from openai import OpenAI
 from .consumers import broadcast_message
 import requests
+from Ai.ai_service import get_ai_response
 
 client = OpenAI(
     base_url="https://openrouter.ai/api/v1",

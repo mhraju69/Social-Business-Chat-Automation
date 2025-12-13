@@ -4,7 +4,42 @@ from django.core.mail import send_mail
 from .models import Booking
 import time    
 from Socials.models import ChatRoom, ChatMessage
-from Socials.helper import generate_ai_response, send_message
+from Socials.helper import *
+
+def get_msg_history(room_id):
+    """
+    Get last 20 messages for a chat room in OpenAI chat format.
+    
+    Args:
+        room_id: The ChatRoom ID to filter messages
+        
+    Returns:
+        List of dicts in format: [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
+        Messages are ordered from oldest to newest (chronological order for context)
+    """
+    # Get last 20 messages for this room, ordered by timestamp (most recent first)
+    messages = ChatMessage.objects.filter(
+        room_id=room_id
+    ).order_by('-timestamp')[:20]
+    
+    # Convert to list and reverse to get chronological order (oldest first)
+    messages_list = list(messages)
+    messages_list.reverse()
+    
+    # Format messages in OpenAI chat format
+    formatted_messages = []
+    for msg in messages_list:
+        # Map message type to role
+        # 'incoming' = user message, 'outgoing' = assistant message
+        role = "user" if msg.type == "incoming" else "assistant"
+        
+        formatted_messages.append({
+            "role": role,
+            "content": msg.text
+        })
+    
+    return formatted_messages
+    
 
 @shared_task
 def send_booking_reminder(booking_id):
@@ -116,7 +151,15 @@ def wait_and_reply(room_id, delay):
 
     # Generate AI reply
     print(f"🤖 [{room.profile.platform}] Generating AI response...")
-    reply_text = generate_ai_response(full_text, room.profile.platform)
+    
+    # Get company from room -> profile -> user -> company
+    company = room.profile.user.company
+    
+    reply_text = get_ai_response(
+        company_id=company.id, 
+        query=full_text, 
+        history=get_msg_history(room_id=room.id)
+    )
     print(f"✅ [{room.profile.platform}] AI response generated: {reply_text[:100]}...")
 
     # Send reply via existing send_message function

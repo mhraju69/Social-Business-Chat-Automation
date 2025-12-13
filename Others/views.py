@@ -844,7 +844,7 @@ class ActiveSessionsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        sessions = UserSession.objects.filter(user=request.user)
+        sessions = UserSession.objects.filter(user=request.user,is_active=True)
         data = [{
             "device": s.device,
             "browser": s.browser,
@@ -1096,3 +1096,64 @@ class BookingDaysView(APIView):
             "timezone": tz_name,
             "days": days_list
         }, status=status.HTTP_200_OK)
+
+class ValidateTokenView(APIView):
+    """
+    API endpoint to validate access token and refresh it if needed.
+    Used for auto-login functionality.
+    """
+    permission_classes = [AllowAny]
+    
+    def post(self, request):
+        """
+        Validate access token and refresh if needed.
+        
+        Request body:
+        {
+            "access_token": "your_access_token",
+            "refresh_token": "your_refresh_token"
+        }
+        
+        Response:
+        {
+            "valid": true/false,
+            "access_token": "new_or_existing_access_token",
+            "refresh_token": "refresh_token",
+            "user": {user_data},
+            "message": "success message"
+        }
+        """
+        access_token = request.data.get('access')
+        refresh_token = request.data.get('refresh')
+        
+        if not access_token:
+            return Response(
+                {"error": "access_token is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Validate and refresh token
+        result = validate_and_refresh_token(access_token, refresh_token)
+        
+        if not result['valid']:
+            return Response(
+                {
+                    "valid": False,
+                    "error": result['error']
+                },
+                status=status.HTTP_401_UNAUTHORIZED
+            )
+        
+        # Import UserSerializer here to avoid circular import
+        from Accounts.serializers import UserSerializer
+        
+        # Token is valid or refreshed successfully
+        response_data = {
+            "valid": True,
+            "user": UserSerializer(result['user']).data,
+            "access": result['access_token'],
+            "refresh": result['refresh_token'],
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+

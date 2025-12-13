@@ -7,9 +7,154 @@ from Socials.helper import send_message
 from rest_framework.response import Response
 from rest_framework import status
 from .serializers import BookingSerializer
-from .models import GoogleCalendar
+from .models import GoogleCalendar, UserSession
 from django.conf import settings
 from Accounts.models import Company
+from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
+from rest_framework_simplejwt.exceptions import TokenError, InvalidToken
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+def validate_and_refresh_token(access_token, refresh_token):
+    """
+    Validates access token and refreshes it if needed.
+    
+    Args:
+        access_token (str): The JWT access token to validate
+        refresh_token (str): The JWT refresh token to use for refreshing
+        
+    Returns:
+        dict: {
+            'valid': bool,
+            'access_token': str or None,
+            'refresh_token': str or None,
+            'user': User object or None,
+            'error': str or None
+        }
+    """
+    result = {
+        'valid': False,
+        'access_token': None,
+        'refresh_token': None,
+        'user': None,
+        'error': None
+    }
+    
+    # First, try to validate the access token
+    try:
+        access_token_obj = AccessToken(access_token)
+        user_id = access_token_obj['user_id']
+        
+        # Get the user
+        try:
+            user = User.objects.get(id=user_id)
+            
+            # Check if user is still active and not blocked
+            if user.block:
+                result['error'] = 'Account has been blocked'
+                return result
+            
+            if not user.is_active:
+                result['error'] = 'Account is not active'
+                return result
+            
+            # Access token is valid
+            result['valid'] = True
+            result['access_token'] = access_token
+            result['refresh_token'] = refresh_token
+            result['user'] = user
+            
+            print(f"✅ Access token is valid for user: {user.email}")
+            return result
+            
+        except User.DoesNotExist:
+            result['error'] = 'User not found'
+            return result
+            
+    except (TokenError, InvalidToken) as e:
+        # Access token is invalid or expired, try to refresh
+        print(f"⚠️ Access token invalid/expired: {str(e)}")
+        
+        if not refresh_token:
+            result['error'] = 'Access token expired and no refresh token provided'
+            return result
+        
+        # Try to use refresh token to get new access token
+        try:
+            refresh_token_obj = RefreshToken(refresh_token)
+            user_id = refresh_token_obj['user_id']
+            
+            # Get the user
+            try:
+                user = User.objects.get(id=user_id)
+                
+                # Check if user is still active and not blocked
+                if user.block:
+                    result['error'] = 'Account has been blocked'
+                    return result
+                
+                if not user.is_active:
+                    result['error'] = 'Account is not active'
+                    return result
+                
+                # Generate new access token from refresh token
+                new_access_token_obj = refresh_token_obj.access_token
+                new_access_token = str(new_access_token_obj)
+                new_jti = new_access_token_obj['jti']
+                
+                # Get the old token's JTI to find the session
+                try:
+                    old_access_token_obj = AccessToken(access_token)
+                    old_jti = old_access_token_obj['jti']
+                    
+                    # Update the session with the new token
+                    session = UserSession.objects.filter(
+                        user=user, 
+                        token=old_jti,
+                        is_active=True
+                    ).first()
+                    
+                    if session:
+                        session.token = new_jti
+                        session.save()
+                        print(f"🔄 Updated session token from {old_jti[:10]}... to {new_jti[:10]}...")
+                    else:
+                        print(f"⚠️ No active session found with old token JTI: {old_jti[:10]}...")
+                        
+                except (TokenError, InvalidToken):
+                    # Old token is completely invalid, can't extract JTI
+                    # Try to find any active session for this user and update it
+                    print(f"⚠️ Could not extract JTI from old token, updating most recent session")
+                    session = UserSession.objects.filter(
+                        user=user,
+                        is_active=True
+                    ).order_by('-last_active').first()
+                    
+                    if session:
+                        session.token = new_jti
+                        session.save()
+                        print(f"🔄 Updated most recent session to new token: {new_jti[:10]}...")
+                
+                result['valid'] = True
+                result['access_token'] = new_access_token
+                result['refresh_token'] = refresh_token
+                result['user'] = user
+                
+                print(f"✅ Generated new access token for user: {user.email}")
+                return result
+                
+            except User.DoesNotExist:
+                result['error'] = 'User not found'
+                return result
+                
+        except (TokenError, InvalidToken) as e:
+            result['error'] = f'Refresh token is invalid or expired: {str(e)}'
+            return result
+    
+    except Exception as e:
+        result['error'] = f'Unexpected error: {str(e)}'
+        return result
 
 def format_whatsapp_number(number):
 
