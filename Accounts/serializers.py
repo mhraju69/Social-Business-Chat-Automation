@@ -85,7 +85,7 @@ class LoginSerializer(serializers.Serializer):
         # platform = details[2].strip()
         device = "Desktop"
         platform = "Desktop"
-        UserSession.objects.create(
+        session = UserSession.objects.create(
             user=user,
             device=device,
             browser=platform,
@@ -95,6 +95,7 @@ class LoginSerializer(serializers.Serializer):
         )
         return {
             "user": UserSerializer(user).data,
+            "session_id": session.id,
             "refresh": str(refresh),
             "access": str(access),  # Use the same access token, not a new one!
         }  
