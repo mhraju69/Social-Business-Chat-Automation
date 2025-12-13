@@ -65,6 +65,9 @@ INSTALLED_APPS = [
     'Socials',
     'Finance',
     'admin_dashboard',
+
+    'drf_spectacular',
+    'drf_spectacular_sidecar',
     'Ai',
 ]
 
@@ -166,7 +169,8 @@ REST_FRAMEWORK = {
         ),
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
-    ]
+    ],
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
 AUTH_USER_MODEL = 'Accounts.User'
@@ -202,3 +206,11 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 1024 ** 4
 
 CELERY_BROKER_URL = 'redis://redis:6379/0'  
 CELERY_RESULT_BACKEND = 'redis://redis:6379/0'
+
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'TalkFusion API',
+    'DESCRIPTION': 'API documentation for TalkFusion',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+}
