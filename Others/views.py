@@ -2,7 +2,7 @@ from rest_framework.response import Response
 from rest_framework import status,permissions,generics
 from rest_framework.views import APIView 
 from rest_framework.viewsets import ModelViewSet 
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated,AllowAny
 from .models import *
 from Finance.models import *
 from django.conf import settings
@@ -12,140 +12,19 @@ from rest_framework.exceptions import PermissionDenied
 import requests
 from django.utils import timezone
 import pytz
-from datetime import timedelta
+from datetime import timedelta, datetime
 from django.db.models import Sum,Count
 from Accounts.permissions import *
 from .helper import *
 import urllib.parse
-
-def get_google_access_token(google_account):
-    data = {
-        "client_id": settings.GOOGLE_CLIENT_ID,
-        "client_secret": settings.GOOGLE_CLIENT_SECRET,
-        "refresh_token": google_account.refresh_token,
-        "grant_type": "refresh_token",
-    }
-    response = requests.post(google_account.token_uri, data=data)
-    result = response.json()
-    return result.get("access_token")
+from django.shortcuts import render
 
 class ClientBookingView(APIView):
-    def post(self, request, company_id):
-        company = Company.objects.filter(id=company_id).first()
-        
-        if not company:
-            return Response(
-                {"error": "Company not found"}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        data = request.data.copy()
-        number = data.get('number')
-        tz_offset = company.user.timezone or "+6"
-        
-        # Convert local time to UTC
-        if 'start_time' in data:
-            start_time_local = data['start_time']  # "2025-11-21 06:06:00"
-            
-            # Parse as naive datetime
-            if isinstance(start_time_local, str):
-                start_dt = datetime.strptime(start_time_local, "%Y-%m-%d %H:%M:%S")
-            else:
-                start_dt = start_time_local
-            
-            # Get user timezone
-            offset_hours = float(tz_offset)
-            offset_minutes = int(offset_hours * 60)
-            user_tz = pytz.FixedOffset(offset_minutes)
-            
-            # Localize to user timezone
-            start_aware = user_tz.localize(start_dt)
-            
-            # Convert to UTC
-            start_utc = start_aware.astimezone(pytz.UTC)
-            
-            print(f"📥 Input (local): {start_time_local}")
-            print(f"🌍 Timezone: {tz_offset}")
-            print(f"🌐 Saved (UTC): {start_utc}")
-            
-            data['start_time'] = start_utc
-        
-        if 'end_time' in data:
-            end_time_local = data['end_time']
-            
-            if isinstance(end_time_local, str):
-                end_dt = datetime.strptime(end_time_local, "%Y-%m-%d %H:%M:%S")
-            else:
-                end_dt = end_time_local
-            
-            offset_hours = float(tz_offset)
-            offset_minutes = int(offset_hours * 60)
-            user_tz = pytz.FixedOffset(offset_minutes)
-            end_aware = user_tz.localize(end_dt)
-            end_utc = end_aware.astimezone(pytz.UTC)
-            
-            data['end_time'] = end_utc
-        
-        # Create booking
-        serializer = BookingSerializer(data=data)
-        serializer.is_valid(raise_exception=True)
-        booking = serializer.save(company=company)
-        
-        # Create Google Calendar event
-        google_account = GoogleAccount.objects.filter(company=company).first()
-        if google_account:
-            access_token = get_google_access_token(google_account)
-            if not access_token:
-                return Response(
-                    {"error": "Unable to get access token"}, 
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-            
-            # Prepare event data with proper timezone
-            event_data = {
-                "summary": booking.title,
-                "description": booking.notes or "",
-                "start": {
-                    "dateTime": booking.start_time.isoformat(),
-                    "timeZone": "UTC"  # Since we're storing in UTC
-                },
-                "end": {
-                    "dateTime": (booking.end_time or booking.start_time).isoformat(),
-                    "timeZone": "UTC"
-                },
-                "location": booking.location or "",
-                "attendees": [{"email": booking.client}] if booking.client else [],
-            }
-            
-            headers = {"Authorization": f"Bearer {access_token}"}
-            response = requests.post(
-                "https://www.googleapis.com/calendar/v3/calendars/primary/events",
-                headers=headers,
-                json=event_data
-            )
-            
-            if response.status_code in [200, 201]:
-                event = response.json()
-                booking.google_event_id = event.get("id")
-                booking.event_link = event.get("htmlLink")
-                booking.save()
-        
-        # Send confirmation SMS
-        if number:
-            # Convert UTC time back to local for display
-            user_tz = parse_timezone_offset(tz_offset)
-            start_local = booking.start_time.astimezone(user_tz)
-            
-            text_message = (
-                f"Booking Confirmed ✓\n"
-                f"Title: {booking.title}\n"
-                f"Time: {start_local.strftime('%d %b %Y, %I:%M %p')}\n"
-                f"Location: {booking.location or 'N/A'}\n"
-                f"Event Link: {booking.event_link or 'N/A'}\n"
-                f"\n⏰ Reminder: 1 hour before"
-            )
-            
-            send_via_webhook_style(number, text_message)
+    permission_classes = [permissions.IsAuthenticated]
+    def post(self, request):
+        user = request.user
+        company = Company.objects.filter(user=user).first()
+        booking = create_booking(request,company.id)
         
         return Response(
             BookingSerializer(booking).data, 
@@ -259,13 +138,16 @@ class DashboardView(APIView):
         }
 
     def get_chat_channel_status(self, user):
-
+        company = Company.objects.filter(user=user).first()
+        calendar = GoogleCalendar.objects.filter(company=company).exists()
         platforms = ['whatsapp', 'facebook', 'instagram']
         status = {}
 
         for platform in platforms:
             exists = ChatProfile.objects.filter(user=user, platform=platform).exists()
             status[platform] = exists
+        
+        status['calendar'] = calendar
 
         return status
     
@@ -280,10 +162,10 @@ class DashboardView(APIView):
         chat_status = self.get_chat_channel_status(request.user)
 
         return Response({
-            "open_cha": open_chat_count,
+            "open_chat": open_chat_count,
             "today_payments": today_payments,
             "today_meetings": today_meetings,
-             "channel_status": chat_status
+            "channel_status": chat_status
         })
     
 class UserActivityLogView(APIView):
@@ -326,7 +208,7 @@ class UserActivityLogView(APIView):
         activities.sort(key=lambda x: x['timestamp'], reverse=True)
         
         # Return last 20 activities
-        serializer = ActivityLogSerializer(activities[:20], many=True)
+        serializer = ActivityLogSerializer(activities[:10], many=True)
         return Response(serializer.data)
     
     def get_activity_type(self, record):
@@ -576,7 +458,38 @@ class AnalyticsView(generics.GenericAPIView):
             
         qs = self.filter_by_type(qs, msg_type)
 
-        return qs.count()
+        # Get total count
+        total_count = qs.count()
+        
+        # Get count per platform
+        platforms = qs.values("room__profile__platform").annotate(count=Count("id"))
+        
+        # Initialize result with 0 for all platforms
+        result = {
+            "whatsapp": {"count": 0, "percentage": 0.0},
+            "facebook": {"count": 0, "percentage": 0.0},
+            "instagram": {"count": 0, "percentage": 0.0}
+        }
+        
+        # Update with actual counts and calculate percentages
+        for p in platforms:
+            platform = p["room__profile__platform"]
+            count = p["count"]
+            percentage = round((count / total_count * 100), 2) if total_count > 0 else 0.0
+            result[platform] = {
+                "count": count,
+                "percentage": percentage
+            }
+        res = {
+            "whatsapp": result["whatsapp"]["percentage"],
+            "facebook": result["facebook"]["percentage"],
+            "instagram": result["instagram"]["percentage"]
+        }
+        
+        return {
+            "total": total_count,
+            "platforms": res
+        }
 
     def get_booking_count(self, request, company):
         qs = Booking.objects.filter(company=company)
@@ -800,19 +713,20 @@ class SupportTicketViewSet(ModelViewSet):
             )
         return super().update(request, *args, **kwargs)
     
-class SaveGoogleAccountView(APIView):
+class ConnectGoogleCalendarView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
         company = Company.objects.filter(user=request.user).first()
+        method = request.data.get("from", "web")
         if not company:
             return Response(
                 {"error": "Company not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
-        google_account, _ = GoogleAccount.objects.get_or_create(company=company)
+        google_account, _ = GoogleCalendar.objects.get_or_create(company=company)
 
-        serializer = GoogleAccountSerializer(
+        serializer = GoogleCalendarSerializer(
             google_account,
             data=request.data,
             partial=True
@@ -820,15 +734,16 @@ class SaveGoogleAccountView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save(company=company)
 
-        redirect_uri = request.build_absolute_uri("/api/google/oauth/callback/")
+        redirect_uri = "https://ape-in-eft.ngrok-free.app/api/google/calendar/callback/"
 
         params = {
-            "client_id": google_account.GOOGLE_CLIENT_ID,
+            "client_id": settings.GOOGLE_CLIENT_ID,
             "redirect_uri": redirect_uri,
             "response_type": "code",
             "access_type": "offline",
             "prompt": "consent",
-            "scope": "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/userinfo.email"
+            "scope": "https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/userinfo.email",
+            "state":f"{request.user.id}_{method}",
         }
 
         auth_url = (
@@ -839,40 +754,64 @@ class SaveGoogleAccountView(APIView):
         return Response({"auth_url": auth_url}, status=status.HTTP_200_OK)
 
 class GoogleOAuthCallbackView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [AllowAny]
 
     def get(self, request):
         code = request.query_params.get("code")
+        state = request.query_params.get("state")
+        
         if not code:
             return Response(
                 {"error": "Missing authorization code"},
                 status=status.HTTP_400_BAD_REQUEST
             )
         
-        company = Company.objects.filter(user=request.user).first()
+        if not state:
+            return Response(
+                {"error": "Missing state parameter"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        # Parse state parameter (format: "user_id_method")
+        try:
+            if "_" in state:
+                user_id_str, method = state.split("_", 1)
+                user_id = int(user_id_str)
+            else:
+                user_id = int(state)
+                method = "web"
+
+            user = User.objects.get(id=user_id)
+        except (ValueError, User.DoesNotExist):
+            return Response(
+                {"error": "Invalid user"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        company = Company.objects.filter(user=user).first()
         if not company:
             return Response(
                 {"error": "Company not found"},
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        google_account = GoogleAccount.objects.filter(company=company).first()
-        if not google_account:
+        google_calendar = GoogleCalendar.objects.filter(company=company).first()
+        if not google_calendar:
             return Response(
-                {"error": "Google account not initialized"},
+                {"error": "Google calendar not initialized"},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         # Your redirect URL (must match the one used in SaveGoogleAccountView)
-        redirect_uri = request.build_absolute_uri("/api/google/oauth/callback/")
+        redirect_uri = "https://ape-in-eft.ngrok-free.app/api/google/calendar/callback/"
 
         token_url = "https://oauth2.googleapis.com/token"
 
         data = {
             "code": code,
-            "client_id": google_account.client_id,
-            "client_secret": google_account.client_secret,
-            "redirect_uri": redirect_uri,
+            "client_id": settings.GOOGLE_CLIENT_ID,
+            "client_secret": settings.GOOGLE_CLIENT_SECRET,
+            "redirect_uri": redirect_uri,           
             "grant_type": "authorization_code"
         }
 
@@ -887,11 +826,273 @@ class GoogleOAuthCallbackView(APIView):
         token_data = response.json()
 
         # Save tokens
-        google_account.access_token = token_data.get("access_token")
-        google_account.refresh_token = token_data.get("refresh_token", google_account.refresh_token)
-        google_account.scopes = ["https://www.googleapis.com/auth/calendar"]
-        google_account.save()
+        google_calendar.access_token = token_data.get("access_token")
+        google_calendar.refresh_token = token_data.get("refresh_token", google_calendar.refresh_token)
+        google_calendar.scopes = ["https://www.googleapis.com/auth/calendar"]
+        google_calendar.save()
 
+        # return Response(
+        #     {"message": "Google Calendar connected successfully!"}
+        # )
+        if method == "app":
+            return render(request, 'redirect.html')
         return Response(
             {"message": "Google Calendar connected successfully!"}
         )
+
+class ActiveSessionsView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        sessions = UserSession.objects.filter(user=request.user)
+        data = [{
+            "device": s.device,
+            "browser": s.browser,
+            "location": s.location,
+            "ip": s.ip_address,
+            "last_active": s.last_active,
+            "session_id": s.id,
+        } for s in list(reversed(sessions))[:5]]
+
+        return Response(data)
+
+class LogoutSessionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request, session_id):
+        try:
+            session = UserSession.objects.get(id=session_id, user=request.user)
+            session.is_active = False
+            session.save()
+            return Response({"message": "Logout successful"})
+        except UserSession.DoesNotExist:
+            return Response({"error": "Session not found"}, status=status.HTTP_404_NOT_FOUND)
+
+class LogoutAllSessionsView(APIView):
+    permission_classes = [IsAuthenticated] 
+
+    def post(self, request):
+        try:
+            sessions = UserSession.objects.filter(user=request.user, is_active=True)
+            sessions.update(is_active=False)
+            return Response({"message": "Logout successful"})
+        except UserSession.DoesNotExist:
+            return Response({"error": "Session not found"}, status=status.HTTP_404_NOT_FOUND)
+
+class MonthlyBookingsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        try:
+            company = Company.objects.get(user=request.user)
+        except Company.DoesNotExist:
+            return Response(
+                {"error": "Company profile not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        tz_name = request.GET.get('timezone') or 'UTC'
+        try:
+            company_tz = pytz.timezone(tz_name)
+        except pytz.exceptions.UnknownTimeZoneError:
+            company_tz = pytz.UTC
+
+        now_utc = timezone.now()
+        now_local = now_utc.astimezone(company_tz)
+        try:
+            month = int(request.GET.get('month', now_local.month))
+            year = int(request.GET.get('year', now_local.year))
+            day_param = request.GET.get('day')
+            day = int(day_param) if day_param else None
+        except (ValueError, TypeError):
+            return Response(
+                {"error": "Invalid date parameters"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if month < 1 or month > 12:
+            return Response(
+                {"error": "Month must be between 1 and 12"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if day:
+            try:
+                # Calculate start and end of the day in local timezone
+                start_local = company_tz.localize(
+                    datetime(year, month, day, 0, 0, 0)
+                )
+                # End of day is start of next day
+                end_local = start_local + timedelta(days=1)
+            except ValueError:
+                return Response(
+                    {"error": "Invalid day for given month and year"}, 
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            # Calculate start and end of the month in local timezone
+            start_local = company_tz.localize(
+                datetime(year, month, 1, 0, 0, 0)
+            )
+            
+            # Calculate end of month (start of next month)
+            if month == 12:
+                end_local = company_tz.localize(
+                    datetime(year + 1, 1, 1, 0, 0, 0)
+                )
+            else:
+                end_local = company_tz.localize(
+                    datetime(year, month + 1, 1, 0, 0, 0)
+                )
+
+        # Convert to UTC for database query
+        start_utc = start_local.astimezone(pytz.UTC)
+        end_utc = end_local.astimezone(pytz.UTC)
+
+        # Query bookings for the month
+        bookings_qs = Booking.objects.filter(
+            company=company,
+            start_time__gte=start_utc,
+            start_time__lt=end_utc
+        ).order_by('start_time')
+
+        # Prepare booking list with details
+        bookings_list = []
+        for booking in bookings_qs:
+            # Convert times to local timezone for display
+            start_local = booking.start_time.astimezone(company_tz)
+            end_local = booking.end_time.astimezone(company_tz) if booking.end_time else None
+
+            booking_data = {
+                "id": booking.id,
+                "title": booking.title,
+                "client": booking.client,
+                "start_time": start_local.strftime("%Y-%m-%d %H:%M:%S"),
+                "end_time": end_local.strftime("%Y-%m-%d %H:%M:%S") if end_local else None,
+                "location": booking.location,
+                "price": booking.price,
+                "notes": booking.notes,
+                "event_link": booking.event_link,
+                "google_event_id": booking.google_event_id,
+                "reminder_hours_before": booking.reminder_hours_before,
+                "created_at": booking.created_at.astimezone(company_tz).strftime("%Y-%m-%d %H:%M:%S")
+            }
+            bookings_list.append(booking_data)
+
+        return Response({
+            "day": day,
+            "month": month,
+            "year": year,
+            "timezone": tz_name,
+            "total_bookings": bookings_qs.count(),
+            "bookings": bookings_list
+        }, status=status.HTTP_200_OK)
+
+class AITrainingFileBulkUploadView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        company = Company.objects.filter(user=request.user).first()
+        if not company:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        files = request.FILES.getlist('files')
+        if not files:
+            return Response({"error": "No files provided"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        created_files = []
+        for file in files:
+            ai_file = AITrainingFile.objects.create(company=company, file=file)
+            created_files.append(ai_file)
+            
+        serializer = AITrainingFileSerializer(created_files, many=True)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+    
+    def get(self, request):
+        company = Company.objects.filter(user=request.user).first()
+        if not company:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+        files = AITrainingFile.objects.filter(company=company)
+        serializer = AITrainingFileSerializer(files, many=True)
+        return Response(serializer.data)
+
+class BookingDaysView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get(self, request):
+        company = Company.objects.filter(user=request.user).first()
+        if not company:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        # Get timezone
+        tz_name = request.GET.get('timezone') or 'UTC'
+        try:
+            company_tz = pytz.timezone(tz_name)
+        except pytz.exceptions.UnknownTimeZoneError:
+            company_tz = pytz.UTC
+
+        # Get current time in company timezone
+        now_utc = timezone.now()
+        now_local = now_utc.astimezone(company_tz)
+        
+        # Get month and year from query params
+        try:
+            month = int(request.GET.get('month', now_local.month))
+            year = int(request.GET.get('year', now_local.year))
+        except (ValueError, TypeError):
+            return Response(
+                {"error": "Invalid month or year parameters"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Validate month
+        if month < 1 or month > 12:
+            return Response(
+                {"error": "Month must be between 1 and 12"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Calculate start and end of the month in local timezone
+        start_local = company_tz.localize(
+            datetime(year, month, 1, 0, 0, 0)
+        )
+        
+        # Calculate end of month (start of next month)
+        if month == 12:
+            end_local = company_tz.localize(
+                datetime(year + 1, 1, 1, 0, 0, 0)
+            )
+        else:
+            end_local = company_tz.localize(
+                datetime(year, month + 1, 1, 0, 0, 0)
+            )
+
+        # Convert to UTC for database query
+        start_utc = start_local.astimezone(pytz.UTC)
+        end_utc = end_local.astimezone(pytz.UTC)
+
+        # Query bookings for the month
+        bookings_qs = Booking.objects.filter(
+            company=company,
+            start_time__gte=start_utc,
+            start_time__lt=end_utc
+        )
+
+        # Extract unique days from bookings
+        booking_days = set()
+        for booking in bookings_qs:
+            # Convert booking time to local timezone
+            booking_local = booking.start_time.astimezone(company_tz)
+            # Add the day to the set
+            booking_days.add(booking_local.day)
+
+        # Convert set to sorted list
+        days_list = sorted(list(booking_days))
+
+        return Response({
+            "month": month,
+            "year": year,
+            "timezone": tz_name,
+            "days": days_list
+        }, status=status.HTTP_200_OK)

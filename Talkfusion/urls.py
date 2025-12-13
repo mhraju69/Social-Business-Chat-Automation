@@ -18,8 +18,8 @@ urlpatterns = [
     path("webhook/<str:platform>/", unified_webhook, name="unified_webhook"),
     path('facebook/callback/', facebook_callback),  
     path('instagram/callback/', instagram_callback),
-    path('connect/fb/', FacebookConnectView.as_view(),name='facebook_connect'),
-    path('connect/ig/', InstagramConnectView.as_view(),name='instagram_connect'),
+    path('api/connect/fb/', FacebookConnectView.as_view(),name='facebook_connect'),
+    path('api/connect/ig/', InstagramConnectView.as_view(),name='instagram_connect'),
     path('', RedirectView.as_view(url='/admin/', permanent=False)),
     path('api/admin/', include('admin_dashboard.urls')),
 

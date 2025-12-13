@@ -98,7 +98,7 @@ class FAQ(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     
-class GoogleAccount(models.Model):
+class GoogleCalendar(models.Model):
     company = models.OneToOneField(Company, on_delete=models.CASCADE, related_name='google_account')
     access_token = models.TextField(blank=True,null=True)
     refresh_token = models.TextField(blank=True,null=True)
@@ -209,3 +209,25 @@ class SupportTicket(models.Model):
         if not self.ticket_id:
             self.ticket_id = self.generate_ticket_id()
         super().save(*args, **kwargs)
+
+class UserSession(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    device = models.CharField(max_length=200)
+    browser = models.CharField(max_length=200)
+    ip_address = models.GenericIPAddressField()
+    location = models.CharField(max_length=200, blank=True, null=True)
+    token = models.CharField(max_length=500)  # store JWT
+    last_active = models.DateTimeField(auto_now=True)
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.user.email} - {self.device}"
+
+class AITrainingFile(models.Model):
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='ai_training_files')
+    file = models.FileField(upload_to='ai_training_files/')
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.company.name} - {self.file.name}"

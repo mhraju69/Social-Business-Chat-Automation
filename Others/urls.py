@@ -11,10 +11,9 @@ urlpatterns = [
     path('login/', LoginView.as_view(), name='login'),
     path('verify-otp/',VerifyOTP.as_view(), name="verify_otp"),
     path('dashboard/', DashboardView.as_view()),
-    # path('booking/<int:company_id>/', ClientBookingView.as_view()),
-    # path("google/connect/", GoogleConnectView.as_view()),
-    path("google/calander/connect/", SaveGoogleAccountView.as_view()),
-    path("google/calander/callback/", GoogleOAuthCallbackView.as_view()),
+    path('booking/', ClientBookingView.as_view()),  
+    path("google/calendar/connect/", ConnectGoogleCalendarView.as_view()),
+    path("google/calendar/callback/", GoogleOAuthCallbackView.as_view()),
     path('analytics/', AnalyticsView.as_view(), name='analytics'),
     path('log/', UserActivityLogView.as_view(), name='user-activity-log'),
     path('opening-hours/', OpeningHoursCreateView.as_view(), name='opening-hours-create'),
@@ -24,5 +23,7 @@ urlpatterns = [
     path('knowledge-base/', KnowledgeBaseListCreateView.as_view(), name='knowledgebase-list-create'),
     path('knowledge-base/<int:id>/', KnowledgeBaseRetrieveUpdateDestroyView.as_view(), name='knowledgebase-detail'),
     path('finance-data/', FinanceDataView.as_view(), name='knowledgebase-list-create'),
-    
+    path('bookings/monthly/', MonthlyBookingsView.as_view(), name='monthly-bookings'),
+    path('bookings/days/', BookingDaysView.as_view(), name='booking-days'),
+    path('ai-training-files/', AITrainingFileBulkUploadView.as_view(), name='ai-training-files'),
 ]

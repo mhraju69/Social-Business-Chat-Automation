@@ -1,8 +1,9 @@
 # serializers.py
-from rest_framework import serializers
 from .models import *
-# from Others.models import Company
-from .utils import send_otp
+from Others.models import *
+from .utils import *
+import requests,re
+from rest_framework import serializers
 from rest_framework_simplejwt.tokens import RefreshToken
 
 class UserSerializer(serializers.ModelSerializer):
@@ -54,6 +55,7 @@ class LoginSerializer(serializers.Serializer):
     def validate(self, data):
         email = data.get("email")
         password = data.get("password")
+        request = self.context.get('request')
 
         if not email or not password:
             raise serializers.ValidationError("Both email and password are required.")
@@ -67,17 +69,35 @@ class LoginSerializer(serializers.Serializer):
         if not user.check_password(password):
             raise serializers.ValidationError("Invalid email or password.")
         if not user.is_active:
-            otp = user.user_otp.first()
-            if otp and otp.is_expired():
-                send_otp(user.email, 'Login')
+            # otp = user.user_otp.first()
+            # if otp and otp.is_expired():
+            #     send_otp(user.email, 'Login')
             raise serializers.ValidationError("Account is not active. Please verify your email to activate your account.")
         # Generate JWT tokens
         refresh = RefreshToken.for_user(user)
+        access = refresh.access_token
+        ua_string = request.META.get('HTTP_USER_AGENT', '')
 
+        print(f"☘️☘️☘️☘️☘️☘️User Agent: {ua_string}")
+        
+        # details = ua_string.split(",")
+        # device = f"{details[0].strip()} {details[1].strip()}"
+        # platform = details[2].strip()
+        device = "Desktop"
+        platform = "Desktop"
+        session = UserSession.objects.create(
+            user=user,
+            device=device,
+            browser=platform,
+            ip_address=get_client_ip(request),
+            token=str(access['jti']),
+            location=get_location(get_client_ip(request))
+        )
         return {
             "user": UserSerializer(user).data,
+            "session_id": session.id,
             "refresh": str(refresh),
-            "access": str(refresh.access_token),
+            "access": str(access),  # Use the same access token, not a new one!
         }  
     
 class CompanySerializer(serializers.ModelSerializer):

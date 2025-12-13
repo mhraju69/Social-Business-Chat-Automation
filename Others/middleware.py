@@ -1,32 +1,38 @@
-from rest_framework_simplejwt.tokens import AccessToken
-from django.contrib.auth import get_user_model
-from urllib.parse import parse_qs
+from rest_framework_simplejwt.authentication import JWTAuthentication
+from django.utils.timezone import now
+from .models import UserSession
+from django.core.exceptions import PermissionDenied
 
-User = get_user_model()
+class UpdateLastActiveMiddleware:
+    def __init__(self, get_response):
+        self.get_response = get_response
 
-class JwtAuthMiddleware:
-    """Authenticate WebSocket connections using JWT from querystring."""
-    def __init__(self, inner):
-        self.inner = inner
+    def __call__(self, request):
+        jwt_auth = JWTAuthentication()
+        try:
+            user_auth = jwt_auth.authenticate(request)
+        except Exception:
+            user_auth = None
 
-    async def __call__(self, scope, receive, send):
-        query = parse_qs(scope["query_string"].decode())
-        token = query.get("token")
-
-        scope["user"] = None
-        if token:
+        if user_auth:
+            user, token = user_auth
             try:
-                access_token = AccessToken(token[0])
-                user = await self.get_user(access_token["user_id"])
-                scope["user"] = user
+                jti = str(token['jti'])
+                return self.get_response(request)
             except Exception:
                 pass
-
-        return await self.inner(scope, receive, send)
-
-    @staticmethod
-    async def get_user(user_id):
-        try:
-            return User.objects.get(id=user_id)
-        except User.DoesNotExist:
-            return None
+            session = UserSession.objects.filter(user=user, token=jti).first()
+            
+            if session:
+                
+                if not session.is_active:
+                    raise PermissionDenied("Session expired or logged out")
+                
+                session.last_active = now()
+                session.save()
+            else:
+                all_sessions = UserSession.objects.filter(user=user)
+                for s in all_sessions:
+                    s.is_active = False
+                    s.save()
+        return self.get_response(request)
