@@ -246,7 +246,7 @@ def get_google_access_token(google_account):
         print(f"❌ Exception refreshing token: {e}")
         return None
 
-def create_booking(request,company_id):
+def create_booking(request,company_id,data=None):
 
     company = Company.objects.filter(id=company_id).first()
         
@@ -255,17 +255,13 @@ def create_booking(request,company_id):
             {"error": "Company not found"}, 
             status=status.HTTP_404_NOT_FOUND
         )
-    
-    data = request.data.copy()
+    if data is None:
+        data = request.data.copy()
     number = data.get('number')
     
     # Get timezone from params (e.g., "Asia/Dhaka" or "+06:00")
-    timezone_str = request.query_params.get('timezone') or request.data.get('timezone') or 'UTC'
+    timezone_str = request.query_params.get('timezone') or data.get('timezone') or 'UTC'
     
-    # Fix common timezone typos
-    if timezone_str == "Dhaka/Asia":
-        timezone_str = "Asia/Dhaka"
-        
     try:
         # Try to parse as timezone name first (e.g., "Asia/Dhaka")
         user_tz = pytz.timezone(timezone_str)
