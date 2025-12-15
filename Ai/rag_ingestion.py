@@ -12,7 +12,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "Talkfusion.settings")
 django.setup()
 
-from Others.models import KnowledgeBase, AITrainingFile, Company
+from Others.models import KnowledgeBase, AITrainingFile, Booking, OpeningHours
+from Accounts.models import Company, User, Service
 from django.conf import settings
 
 # RAG / ML Imports
@@ -206,6 +207,70 @@ def process_company_knowledge(company_id: int):
                 "text": text_content,
                 "metadata": {"source": "AITrainingFile", "filename": tf.file.name, "company_id": company_id}
             }
+
+    # Process Services
+    services = Service.objects.filter(company__id=company_id)
+    for svc in services:
+        sid = f"svc_{svc.id}"
+        text_content = f"Service: {svc.name}\n"
+        if svc.description:
+            text_content += f"Description: {svc.description}\n"
+        text_content += f"Price: {svc.price}\n"
+        if svc.start_time and svc.end_time:
+            text_content += f"Duration/Time: {svc.start_time} - {svc.end_time}\n"
+        
+        current_sources[sid] = {
+            "text": text_content,
+            "metadata": {"source": "Service", "name": svc.name, "company_id": company_id}
+        }
+
+    # Process Bookings (Future/Recent)
+    # Maybe limit to active bookings to avoid pollution?
+    bookings = Booking.objects.filter(company__id=company_id)
+    for bk in bookings:
+        sid = f"bk_{bk.id}"
+        text_content = f"Booking: {bk.title}\nTime: {bk.start_time} to {bk.end_time}\n"
+        if bk.client:
+            text_content += f"Client: {bk.client}\n"
+        if bk.location:
+            text_content += f"Location: {bk.location}\n"
+        if bk.notes:
+            text_content += f"Notes: {bk.notes}\n"
+        
+        current_sources[sid] = {
+            "text": text_content,
+            "metadata": {"source": "Booking", "title": bk.title, "company_id": company_id}
+        }
+
+    # Process User (Company Owner)
+    try:
+        company = Company.objects.get(id=company_id)
+        owner = company.user
+        sid = f"usr_{owner.id}"
+        text_content = f"Company Owner/Profile: {owner.name or owner.email}\n"
+        text_content += f"Email: {owner.email}\n"
+        if owner.phone:
+            text_content += f"Phone: {owner.phone}\n"
+        
+        current_sources[sid] = {
+            "text": text_content,
+            "metadata": {"source": "User", "name": owner.name or "Owner", "company_id": company_id}
+        }
+    except Company.DoesNotExist:
+        logger.warning(f"Company {company_id} not found.")
+
+    # Process Opening Hours (Aggregated)
+    opening_hours = OpeningHours.objects.filter(company__id=company_id)
+    if opening_hours.exists():
+        sid = f"opening_{company_id}"
+        text_content = "Opening Hours:\n"
+        for oh in opening_hours:
+            text_content += f"{oh.get_day_display()}: {oh.start} - {oh.end}\n"
+        
+        current_sources[sid] = {
+            "text": text_content,
+            "metadata": {"source": "OpeningHours", "company_id": company_id}
+        }
 
     # 3. Fetch Existing IDs from Qdrant for this Company
     # We use scroll to get all points with filter
