@@ -330,7 +330,7 @@ class GetOldMessage(APIView):
         try:
             room = ChatRoom.objects.get(id=room_id,profile__platform=platform)
             messages = ChatMessage.objects.filter(room=room).order_by('-timestamp')[:50]
-            serializer = ChatMessageSerializer(messages, many=True)
+            serializer = ChatMessageSerializer(messages[::-1], many=True)
             return Response(serializer.data)
         except ChatRoom.DoesNotExist:
             return Response({"error": "Room not found"}, status=404)

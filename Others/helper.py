@@ -171,7 +171,6 @@ def format_whatsapp_number(number):
 
     return digits
 
-
 def send_via_webhook_style(client_number, message_text):
     # Ensure the client exists
     client_obj, _ = ChatClient.objects.get_or_create(platform="whatsapp", client_id=client_number)
@@ -184,7 +183,6 @@ def send_via_webhook_style(client_number, message_text):
     # Use the same send_message function your webhook uses
     print('☘️ Send successfuly')
     return send_message(profile, client_obj, message_text)
-
 
 def parse_timezone_offset(tz_string):
     """Convert timezone string like '+6' to pytz FixedOffset"""
