@@ -1,62 +1,38 @@
 import os
 import sys
-import django
 import logging
 from dotenv import load_dotenv
-
-load_dotenv()
-
-# Django Setup (if run standalone)
-# Django Setup (if run standalone)
-# Ensure project root is in path relative to this file
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "Talkfusion.settings")
-
-try:
-    from django.conf import settings
-    if not settings.configured:
-        django.setup()
-except ImportError:
-    pass
+from typing import List, Dict, Optional
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models as rest
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from langchain_core.runnables import RunnablePassthrough
-from Accounts.models import Company
-# Re-use config from ingestion or define here 
-# (Ideally, shared config file is better, but keeping in 'Ai/' as requested)
+
+# Load environment variables
+load_dotenv()
+
+# Configuration (Mirrors ai_service.py)
 QDRANT_URL = "https://deed639e-bc0e-43fe-8dc2-2edaed834f41.europe-west3-0.gcp.cloud.qdrant.io:6333"
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 COLLECTION_NAME = "company_knowledge"
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
-from typing import List, Dict, Optional
-
-# ... imports ...
-
-def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] = None, tone: str = "professional") -> str:
+def get_manual_rag_response(company_id: int, company_name: str, query: str, history: Optional[List[Dict]] = None, tone: str = "professional") -> str:
     """
-    Generates an AI response for a specific company using RAG.
-    
-    Args:
-        company_id: The ID of the company.
-        query: The user's question.
-        history: List of dictionaries representing conversation history. 
-                 Example: [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "hello"}]
-        tone: The desired tone of the response (e.g., "professional", "friendly", "rude").
+    Standalone RAG function for manual testing.
+    Directly queries Qdrant and OpenAI, bypassing Django models.
     """
     
     # 1. Initialize Clients
     if not QDRANT_API_KEY:
-        return "System Error: Qdrant API Key missing."
+        return "System Error: Qdrant API Key missing in .env"
     if not OPENAI_API_KEY:
-        return "System Error: OpenAI API Key missing."
+        return "System Error: OpenAI API Key missing in .env"
         
     client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=OPENAI_API_KEY)
@@ -69,28 +45,32 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         logger.error(f"Embedding failed: {e}")
         return "I'm having trouble understanding that right now."
         
+    # Filter by company_id
     search_filter = rest.Filter(
         must=[
             rest.FieldCondition(key="company_id", match=rest.MatchValue(value=company_id))
         ]
     )
     
+    print(f"Searching Qdrant for Company ID: {company_id}...")
     results = client.query_points(
         collection_name=COLLECTION_NAME,
         query=query_vector,
         query_filter=search_filter,
         limit=5
     ).points
+    
+    print(f"Found {len(results)} relevant chunks.")
+    # Optional: Print chunk previews for debugging
+    # for i, res in enumerate(results):
+    #     print(f"Chunk {i+1}: {res.payload.get('text', '')[:50]}...")
 
-    company = Company.objects.get(id=company_id)
-    
-    logging.info(f"Found {len(results)} relevant chunks.")
-    
     # 3. Construct Context
     context_text = "\n\n".join([res.payload.get('text', '') for res in results])
     
     if not context_text:
         context_text = "No specific company documents found."
+        print("WARNING: No context found for this query.")
 
     # Format History
     history_text = ""
@@ -102,9 +82,8 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     
     if not history_text:
         history_text = "No previous conversation."
-    company_name = company.name or "Unknown"
-    # 4. Generate Response
-    # Using LangChain LCEL for clean chain
+
+    # 4. Generate Response using the same template as ai_service.py
     template = """
     You are a professional CRM chatbot representing the company "{company_name}".
 
@@ -112,13 +91,16 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     You always communicate as a real human representative of "{company_name}".
 
     Core Identity Rules:
-    - Introduce yourself as a representative of "{company_name}" only in the first message of a new conversation.
-    - Do not repeat greetings or introductions in follow-up messages.
+    - Introduce yourself as a representative of "{company_name}" ONLY if this is the first message in the conversation (when Previous Conversation is "No previous conversation.").
+    - Do NOT repeat greetings or introductions in follow-up messages.
     - Never mention AI, automation, language models, or technical systems.
     - Speak naturally like a real support or sales executive.
     - Be polite, warm, confident, and professional.
     - Sound conversational, not scripted.
     - Keep responses clear and concise.
+    - Do not use any technical jargon or complex language.
+    - Use simple and easy-to-understand language.
+    - Do not use any emojis.
 
     Knowledge & Answering Rules:
     - First, rely on the provided context to answer questions.
@@ -166,6 +148,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     prompt = ChatPromptTemplate.from_template(template)
     chain = prompt | llm | StrOutputParser()
     
+    print("Generating response...")
     response = chain.invoke({
         "company_name": company_name,
         "context": context_text, 
@@ -176,14 +159,64 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     
     return response
 
+def main():
+    print("--- Manual AI Chat Test (Direct Qdrant Connection) ---")
+    
+    # 1. Get Setup Info
+    try:
+        company_id_input = input("Enter Company ID (e.g., 2): ").strip()
+        company_id = int(company_id_input)
+    except ValueError:
+        print("Invalid Company ID. Using default: 2")
+        company_id = 2
+
+    company_name = input("Enter Company Name (default: 'The Company'): ").strip()
+    if not company_name:
+        company_name = "The Company"
+
+    tone = input("Enter Tone (default: professional): ").strip()
+    if not tone:
+        tone = "professional"
+
+    print(f"\nStarting chat session.")
+    print(f"Company: {company_name} (ID: {company_id})")
+    print(f"Tone: {tone}")
+    print("Type 'exit' or 'quit' to stop.\n")
+
+    history = []
+
+    # 2. Chat Loop
+    while True:
+        try:
+            user_input = input("You: ").strip()
+            if user_input.lower() in ["exit", "quit"]:
+                print("Exiting chat...")
+                break
+            
+            if not user_input:
+                continue
+
+            response = get_manual_rag_response(
+                company_id=company_id,
+                company_name=company_name,
+                query=user_input,
+                history=history,
+                tone=tone
+            )
+
+            print(f"AI: {response}\n")
+
+            # Update history
+            history.append({"role": "user", "content": user_input})
+            history.append({"role": "assistant", "content": response})
+
+        except KeyboardInterrupt:
+            print("\nExiting chat...")
+            break
+        except Exception as e:
+            print(f"An error occurred: {e}")
+            import traceback
+            traceback.print_exc()
+
 if __name__ == "__main__":
-    # Test
-    # Simulate a history
-    test_history = [
-        {"role": "user", "content": "Hi there"},
-        {"role": "assistant", "content": "Hello! How can I help you today?"}
-    ]
-    print("Testing Professional Tone:")
-    print(get_ai_response(2, "What is the training data about?", history=test_history, tone="professional"))
-    print("\nTesting Friendly Tone:")
-    print(get_ai_response(2, "What is the training data about?", history=test_history, tone="friendly"))
+    main()
