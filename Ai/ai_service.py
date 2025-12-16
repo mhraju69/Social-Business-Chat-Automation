@@ -25,7 +25,81 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
+from typing import List, Dict, Optional
 from Accounts.models import Company
+import json
+from datetime import datetime, timedelta
+import pytz
+
+class MockRequest:
+    """Mock Django Request object for reusing create_booking logic"""
+    def __init__(self, data=None, query_params=None):
+        self.data = data or {}
+        self.query_params = query_params or {}
+
+def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
+    """
+    Calculate available slots for a given date based on OpeningHours and existing Bookings.
+    Returns a list of strings representing available start times.
+    """
+    from Others.models import OpeningHours, Booking
+    try:
+        if not date_str:
+            target_date = datetime.now()
+        else:
+            target_date = datetime.strptime(date_str, "%Y-%m-%d")
+            
+        # Get weekday (mon, tue, etc.)
+        day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
+        weekday = day_map[target_date.weekday()]
+        
+        # Get Opening Hours
+        hours = OpeningHours.objects.filter(company_id=company_id, day=weekday).first()
+        if not hours:
+            return [] # Closed
+            
+        # Define working hours
+        start_time = datetime.combine(target_date, hours.start)
+        end_time = datetime.combine(target_date, hours.end)
+        
+        # Get Bookings for this day
+        # Note: Booking times are stored in UTC usually, need to handle timezone carefully.
+        # For simplicity in this mock, we assume naive or inconsistent times are aligned.
+        # In production, use strict timezone handling.
+        bookings = Booking.objects.filter(
+            company_id=company_id, 
+            start_time__date=target_date.date()
+        )
+        
+        booked_ranges = []
+        for b in bookings:
+            # We assume booking start/end are datetime objects
+            # Convert to naive for comparison if needed
+            b_start = b.start_time.replace(tzinfo=None) if b.start_time.tzinfo else b.start_time
+            b_end = b.end_time.replace(tzinfo=None) if b.end_time and b.end_time.tzinfo else (b.end_time or (b_start + timedelta(hours=1)))
+            booked_ranges.append((b_start, b_end))
+            
+        # Generate Slots (Hourly)
+        slots = []
+        current = start_time
+        while current + timedelta(hours=1) <= end_time:
+            slot_end = current + timedelta(hours=1)
+            is_taken = False
+            for b_start, b_end in booked_ranges:
+                # Check overlap: (StartA <= EndB) and (EndA >= StartB)
+                if current < b_end and slot_end > b_start:
+                    is_taken = True
+                    break
+            
+            if not is_taken and current > datetime.now(): # Only future slots
+                slots.append(current.strftime("%H:%M"))
+            
+            current += timedelta(hours=1)
+            
+        return slots
+    except Exception as e:
+        logger.error(f"Error calculating slots: {e}")
+        return []
 # Re-use config from ingestion or define here 
 # (Ideally, shared config file is better, but keeping in 'Ai/' as requested)
 QDRANT_URL = "https://deed639e-bc0e-43fe-8dc2-2edaed834f41.europe-west3-0.gcp.cloud.qdrant.io:6333"
@@ -138,6 +212,22 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     • asks about services, pricing, plans, or availability
     • shows clear interest or intent
     - Keep offers helpful and never pushy.
+    
+    Booking & Availability Logic:
+    - If user shows interest -> Ask if they want to book an appointment.
+    - If user asks for availability/slots for a specific day or generally -> Output JSON: {{"action": "check_availability", "date": "YYYY-MM-DD" (or null)}}. **Do this even if they haven't picked a service yet.**
+    - If user wants to book -> Ask for "Service Name/Title", "Date & Time", and "Email" one by one.
+    - Once ALL details (Title, Time, Email) are collected, output JSON:
+      {{
+        "action": "create_booking",
+        "booking_data": {{
+          "title": "...",
+          "start_time": "YYYY-MM-DD HH:MM:SS",
+          "client": "email@example.com"
+        }}
+      }}
+    - IMPORTANT: Do NOT output JSON until you have all 3 fields. Ask clarifying questions first.
+
 
     Conversation Style:
     - Maintain continuity with the conversation history.
@@ -160,21 +250,81 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     {history}
     
     Current Question: {question}
+    Current Date: {current_date}
     
     Answer:"""
     
     prompt = ChatPromptTemplate.from_template(template)
     chain = prompt | llm | StrOutputParser()
     
-    response = chain.invoke({
+    response_text = chain.invoke({
         "company_name": company_name,
         "context": context_text, 
         "question": query,
         "history": history_text,
-        "tone": tone
+        "history": history_text,
+        "tone": tone,
+        "current_date": datetime.now().strftime("%Y-%m-%d")
     })
     
-    return response
+    # 5. Intent Handling (JSON Parsing)
+    try:
+        # Check for JSON block
+        import re
+        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        if json_match:
+            print(f"DEBUG: Found JSON: {json_match.group(0)}")
+            data = json.loads(json_match.group(0))
+            action = data.get("action")
+            print(f"DEBUG: Action: {action}")
+            
+            if action == "check_availability":
+                # checking logic
+                date_str = data.get("date")
+                slots = get_available_slots(company_id, date_str)
+                if slots:
+                    slot_str = ", ".join(slots)
+                    system_msg = f"System Info: Available slots for {date_str or 'today'}: {slot_str}. Present these to the user nicely."
+                else:
+                    system_msg = f"System Info: No slots available for {date_str or 'today'}."
+                
+                # Re-prompt LLM
+                response_text = chain.invoke({
+                    "company_name": company_name,
+                    "context": context_text + "\n" + system_msg, 
+                    "question": query, 
+                    "history": history_text + f"\nAssistant (Internal): Checking slots for {date_str}.\nSystem: {system_msg}",
+                    "tone": tone,
+                    "current_date": datetime.now().strftime("%Y-%m-%d")
+                })
+                # Check if it returned JSON again (loop), if so, force text
+                if "action" in response_text and "check_availability" in response_text:
+                     return f"I checked the slots. {system_msg}"
+                return response_text
+                
+            elif action == "create_booking":
+                from Others.helper import create_booking
+                booking_details = data.get("booking_data")
+                # Create Mock Request
+                mock_req = MockRequest(data=booking_details)
+                # Call helper
+                try:
+                    booking = create_booking(mock_req, company_id)
+                    # Assuming create_booking returns a Booking object or Response
+                    if hasattr(booking, 'id'):
+                         return f"Booking confirmed! Your appointment for {booking.title} is set for {booking.start_time}."
+                    else:
+                         # It might return a Response object with errors
+                         return "I encountered an issue processing your booking. Please try again."
+                except Exception as e:
+                    logger.error(f"Booking creation failed: {e}")
+                    return "Sorry, I couldn't complete the booking at this moment."
+
+    except Exception as e:
+        # Not JSON or parsing failed, just return text
+        pass
+
+    return response_text
 
 if __name__ == "__main__":
     # Test
