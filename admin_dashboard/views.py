@@ -301,12 +301,6 @@ class UserChannelsView(APIView):
     @extend_schema(
         tags=["Admin Dashboard"],
         summary="Get all chat profiles for a specific user",
-        request=inline_serializer(
-            name="UserChannelsRequest",
-            fields={
-                "user_id": serializers.IntegerField()
-            }
-        ),
         responses=inline_serializer(
             name="UserChannelsResponse",
             fields={
@@ -351,3 +345,53 @@ class CompanyListView(generics.ListAPIView):
     filter_backends = [SearchFilter, OrderingFilter]
     search_fields = ['name', 'email', 'phone']
     ordering_fields = ['created_at', 'name', 'email']
+
+class PerformanceAnalyticsAPIView(generics.GenericAPIView):
+    permission_classes = [IsAdmin]
+    
+
+    @extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Get performance analytics data",
+        responses=inline_serializer(
+            name="PerformanceAnalyticsResponse",
+            fields={
+                "total_message_sent": serializers.IntegerField(),
+                "total_message_received": serializers.IntegerField(),
+                "payments_via_chat": serializers.IntegerField(),
+                "monthly_revenue": serializers.FloatField(),
+                "total_revenue": serializers.FloatField(),
+                "total_costs": serializers.FloatField(),
+                "gross_profit": serializers.FloatField(),
+                "arpu": serializers.FloatField(),
+                "time_scope": serializers.CharField(),
+            }
+        ),
+    )
+    def get(self, request, *args, **kwargs):
+
+        time_scope = request.query_params.get('time_scope', 'monthly')
+
+        # need to implement actual calculations based on time_scope
+
+        total_message_sent = 0
+        total_message_received = 0
+        payments_via_chat = 0
+        monthly_revenue = 0
+        total_revienue = Payment.objects.aggregate(total=Sum('amount'))['total'] or 0
+        total_costs = 0  # Placeholder for cost calculation
+        gross_profit = total_revienue - total_costs
+        arpu = total_revienue / User.objects.count() if User.objects.count() > 0 else 0
+
+        data = {
+            "total_message_sent": total_message_sent,
+            "total_message_received": total_message_received,
+            "payments_via_chat": payments_via_chat,
+            "monthly_revenue": monthly_revenue,
+            "total_revenue": total_revienue,
+            "total_costs": total_costs,
+            "gross_profit": gross_profit,
+            "arpu": arpu, 
+            "time_scope": time_scope,
+        }
+        return Response(data)
