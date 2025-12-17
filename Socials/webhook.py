@@ -28,7 +28,7 @@ def unified_webhook(request, platform):
             #---------------------------------------------
             # PLATFORM SPECIFIC DATA PARSING
             #---------------------------------------------
-            
+            name = "Unknown"
             if platform == "whatsapp":
                 entry = data.get("entry", [])
                 if not entry:
@@ -39,7 +39,10 @@ def unified_webhook(request, platform):
 
                 value = changes[0].get("value", {})
                 profile_id = value.get("metadata", {}).get("phone_number_id")
-
+                # {'object': 'whatsapp_business_account', 'entry': [{'id': '2409871142748879', 'changes': [{'value': {'messaging_product': 'whatsapp', 'metadata': {'display_phone_number': '15551379120', 'phone_number_id': '860175507179810'}, 'contacts': [{'profile': {'name': 'Hasan Mehedi'}, 'wa_id': '8801401541283'}], 'messages': [{'from': '8801401541283', 'id': 'wamid.HBgNODgwMTQwMTU0MTI4MxUCABIYFjNFQjBBMUU4QUYyRDdCNDY4QzhGOTAA', 'timestamp': '1765929323', 'text': {'body': 'hy'}, 'type': 'text'}]}, 'field': 'messages'}]}]}
+                contract = value.get("contacts", [])
+                name = contract[0].get("profile", {}).get("name")
+              
                 profile = ChatProfile.objects.filter(
                     platform="whatsapp",
                     profile_id=profile_id,
@@ -132,7 +135,10 @@ def unified_webhook(request, platform):
             #---------------------------------------------
             client_obj, _ = ChatClient.objects.get_or_create(
                 platform=platform,
-                client_id=client_id
+                client_id=client_id,
+                defaults={
+                    "name": name
+                }
             )
             room, _ = ChatRoom.objects.get_or_create(profile=profile, client=client_obj)
 
