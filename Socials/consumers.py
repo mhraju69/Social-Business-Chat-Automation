@@ -266,7 +266,7 @@ def broadcast_message(profile, client_obj, message_text, message_type, room_id=N
             {
                 'type': 'chat_message',  # Consumer এর method name
                 'platform': profile.platform,
-                'client_id': client_obj.client_id,
+                'client_id': client_obj.name if client_obj.name else client_obj.client_id,
                 'message': message_text,
                 'message_type': message_type,
                 'timestamp': datetime.now().isoformat(),
