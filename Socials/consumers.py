@@ -1,15 +1,15 @@
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
+from Accounts.models import Company
 from Others.models import Alert
 from Others.serializers import AlertSerializer
 from asgiref.sync import async_to_sync, sync_to_async
 from channels.layers import get_channel_layer
 from channels.db import database_sync_to_async
-from rest_framework_simplejwt.tokens import UntypedToken
 from django.contrib.auth import get_user_model
 from django.conf import settings
-from openai import OpenAI
 from Socials.models import *
+from Ai.ai_service import get_ai_response
 from rest_framework_simplejwt.tokens import AccessToken
 User = get_user_model()
 
@@ -62,7 +62,7 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
                 'profile_name': p.name if p.name else p.profile_id,
                 'room': [
                     {
-                        'client_id': room.client.client_id,
+                        'client_id': room.client.name if room.client.name else room.client.client_id,
                         'room_id': room.id
                     } for room in rooms
                 ]
@@ -253,18 +253,7 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
             print(f"❌ Send Message Error: {e}")
             return {'success': False, 'error': str(e)}
 
-
 def broadcast_message(profile, client_obj, message_text, message_type, room_id=None):
-    """
-    Webhook থেকে WebSocket এ message broadcast করে
-    
-    Args:
-        profile: ChatProfile object
-        client_obj: ChatClient object
-        message_text: Message content
-        message_type: 'incoming' or 'outgoing'
-        room_id: Optional room ID
-    """
     try:
         channel_layer = get_channel_layer()
         group_name = f"chat_{profile.platform}_{profile.profile_id}"
@@ -288,7 +277,6 @@ def broadcast_message(profile, client_obj, message_text, message_type, room_id=N
         
     except Exception as e:
         print(f"❌ Broadcast Error: {e}")
-
 
 class AlertConsumer(AsyncWebsocketConsumer):
     async def connect(self):
@@ -334,38 +322,21 @@ def send_alert(user, title, subtitle="", type="info"):
     # 2. Send real-time via WebSocket
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
-        f"alerts_{user.id}",  # same group name as in consumer
+        f"alerts_{user.id}",  
         {
-            "type": "send_alert",  # must match method in consumer
+            "type": "send_alert", 
             "alert": AlertSerializer(alert).data
         }
     )
     
     return alert
 
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=settings.AI_TOKEN,
-)
-
-def generate_ai_response(user_message):
-    """Generate AI response using OpenRouter (Gemini model)."""
-    try:
-        completion = client.chat.completions.create(
-            model="google/gemini-2.5-flash-lite-preview-09-2025",
-            messages=[
-                {"role": "system", "content": "You are a helpful WhatsApp assistant."},
-                {"role": "user", "content": user_message},
-            ],
-        )
-        return completion.choices[0].message.content or "Sorry, I couldn't generate a response."
-    except Exception as e:
-        print("⚠️ Error generating AI response:", e)
-        return "Sorry, something went wrong while generating a reply."
-
 class TestChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.room_group_name = "ai_chat"
+        token = self.scope['query_string'].decode().split('token=')[-1]
+        self.user = await GlobalChatConsumer.get_user_from_token(token)
+        self.company = await self.get_company_from_user(self.user)
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
         await self.accept()
         await self.send(text_data=json.dumps({"message": "Welcome to test chat with AI !"}))
@@ -398,6 +369,9 @@ class TestChatConsumer(AsyncWebsocketConsumer):
 
     async def get_ai_response(self, user_message):
         from asgiref.sync import sync_to_async
-        response = await sync_to_async(generate_ai_response)(user_message)
+        response = await sync_to_async(get_ai_response)(self.company.id, user_message, tone="friendly")
         return response
     
+    @database_sync_to_async
+    def get_company_from_user(self, user):
+        return Company.objects.filter(user=user).first()

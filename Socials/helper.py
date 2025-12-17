@@ -6,32 +6,7 @@ from .consumers import broadcast_message
 import requests
 from Ai.ai_service import get_ai_response
 
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=settings.AI_TOKEN,
-)
-
-
-def generate_ai_response(user_message, platform):
-
-    """AI উত্তর তৈরি করে"""
-    try:
-        system_text = f"You are a helpful {platform.capitalize()} chat assistant."
-        res = client.chat.completions.create(
-            model="google/gemini-2.5-flash-lite-preview-09-2025",
-            messages=[
-                {"role": "system", "content": system_text},
-                {"role": "user", "content": user_message},
-            ]
-        )
-        return res.choices[0].message.content or "Sorry, I couldn't generate a response."
-    except Exception as e:
-        print("⚠️ AI Error:", e)
-        return "Sorry, something went wrong while generating a reply."
-
-
 def send_message(profile: ChatProfile, client_obj: ChatClient, message_text):
-    """Outgoing message handle করে সব প্ল্যাটফর্মের জন্য"""
     try:
         res_data = {}
         if profile.platform == "whatsapp":
