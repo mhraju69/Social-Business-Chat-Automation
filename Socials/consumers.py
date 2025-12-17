@@ -49,25 +49,49 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
             print(f"❌ Connection Error: {e}")
             await self.close()
 
-    async def get_profiles_data(self,profiles):
+    @database_sync_to_async
+    def get_profiles_data(self, profiles):
+        from django.db.models import OuterRef, Subquery
         profiles_data = []
-        # Evaluate the queryset safely
-        profiles_list = await sync_to_async(list)(profiles)
 
-        for p in profiles_list:
-            rooms = await sync_to_async(list)(p.rooms.select_related('client').all())
+        for p in profiles:
+            # Annotate rooms with last message details to avoid N+1
+            last_message_qs = ChatMessage.objects.filter(room=OuterRef('pk')).order_by('-timestamp')
+            
+            rooms = p.rooms.select_related('client').annotate(
+                last_msg_text=Subquery(last_message_qs.values('text')[:1]),
+                last_msg_type=Subquery(last_message_qs.values('type')[:1]),
+                last_msg_time=Subquery(last_message_qs.values('timestamp')[:1])
+            )
+
+            rooms_list = []
+            for room in rooms:
+                rooms_list.append({
+                    'client_id': room.client.name if room.client.name else room.client.client_id,
+                    'room_id': room.id,
+                    'last_msg': room.last_msg_text,
+                    'type': room.last_msg_type,
+                    'timestamp': room.last_msg_time.isoformat() if room.last_msg_time else None
+                })
+            
+            # Sort rooms by timestamp (newest first)
+            rooms_list.sort(key=lambda x: x['timestamp'] or "", reverse=True)
+            
             profile_info = {
                 'platform': p.platform,
                 'profile_id': p.profile_id,
                 'profile_name': p.name if p.name else p.profile_id,
-                'room': [
-                    {
-                        'client_id': room.client.name if room.client.name else room.client.client_id,
-                        'room_id': room.id
-                    } for room in rooms
-                ]
+                'room': rooms_list,
+                '_latest_timestamp': rooms_list[0]['timestamp'] if rooms_list else None
             }
             profiles_data.append(profile_info)
+
+        # Sort profiles by latest activity
+        profiles_data.sort(key=lambda x: x['_latest_timestamp'] or "", reverse=True)
+
+        # Cleanup internal key
+        for p in profiles_data:
+            del p['_latest_timestamp']
 
         return profiles_data
 
