@@ -178,13 +178,13 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         history_text = "No previous conversation."
     company_name = company.name or "Unknown"
     # 4. Generate Response
-    # Using LangChain LCEL for clean chain
+    # Using LangChain LCEL
     template = """
     You are a professional CRM chatbot representing the company "{company_name}".
 
     Your tone must be: {tone}.
     You always communicate as a real human representative of "{company_name}".
-
+    
     Core Identity Rules:
     - Introduce yourself as a representative of "{company_name}" only in the first message of a new conversation.
     - Do not repeat greetings or introductions in follow-up messages.
@@ -255,18 +255,33 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     Answer:"""
     
     prompt = ChatPromptTemplate.from_template(template)
-    chain = prompt | llm | StrOutputParser()
+    # Remove StrOutputParser to get full AIMessage object with metadata
+    chain = prompt | llm 
     
-    response_text = chain.invoke({
+    response = chain.invoke({
         "company_name": company_name,
         "context": context_text, 
         "question": query,
-        "history": history_text,
         "history": history_text,
         "tone": tone,
         "current_date": datetime.now().strftime("%Y-%m-%d")
     })
     
+    response_text = response.content
+    
+    # Initialize token stats
+    token_usage = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0
+    }
+    
+    if hasattr(response, 'response_metadata'):
+        usage = response.response_metadata.get('token_usage', {})
+        token_usage["input_tokens"] += usage.get('prompt_tokens', 0)
+        token_usage["output_tokens"] += usage.get('completion_tokens', 0)
+        token_usage["total_tokens"] += usage.get('total_tokens', 0)
+
     # 5. Intent Handling (JSON Parsing)
     try:
         # Check for JSON block
@@ -289,7 +304,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                     system_msg = f"System Info: No slots available for {date_str or 'today'}."
                 
                 # Re-prompt LLM
-                response_text = chain.invoke({
+                response_2 = chain.invoke({
                     "company_name": company_name,
                     "context": context_text + "\n" + system_msg, 
                     "question": query, 
@@ -297,10 +312,27 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                     "tone": tone,
                     "current_date": datetime.now().strftime("%Y-%m-%d")
                 })
+                
+                response_text = response_2.content
+                
+                # Accumulate tokens from second call
+                if hasattr(response_2, 'response_metadata'):
+                    usage = response_2.response_metadata.get('token_usage', {})
+                    token_usage["input_tokens"] += usage.get('prompt_tokens', 0)
+                    token_usage["output_tokens"] += usage.get('completion_tokens', 0)
+                    token_usage["total_tokens"] += usage.get('total_tokens', 0)
+
                 # Check if it returned JSON again (loop), if so, force text
                 if "action" in response_text and "check_availability" in response_text:
-                     return f"I checked the slots. {system_msg}"
-                return response_text
+                     return {
+                         "content": f"I checked the slots. {system_msg}",
+                         "token_usage": token_usage
+                     }
+                
+                return {
+                    "content": response_text,
+                    "token_usage": token_usage
+                }
                 
             elif action == "create_booking":
                 from Others.helper import create_booking
@@ -312,19 +344,31 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                     booking = create_booking(mock_req, company_id)
                     # Assuming create_booking returns a Booking object or Response
                     if hasattr(booking, 'id'):
-                         return f"Booking confirmed! Your appointment for {booking.title} is set for {booking.start_time}."
+                         return {
+                             "content": f"Booking confirmed! Your appointment for {booking.title} is set for {booking.start_time}.",
+                             "token_usage": token_usage
+                         }
                     else:
                          # It might return a Response object with errors
-                         return "I encountered an issue processing your booking. Please try again."
+                         return {
+                             "content": "I encountered an issue processing your booking. Please try again.",
+                             "token_usage": token_usage
+                         }
                 except Exception as e:
                     logger.error(f"Booking creation failed: {e}")
-                    return "Sorry, I couldn't complete the booking at this moment."
+                    return {
+                        "content": "Sorry, I couldn't complete the booking at this moment.",
+                        "token_usage": token_usage
+                    }
 
     except Exception as e:
         # Not JSON or parsing failed, just return text
         pass
 
-    return response_text
+    return {
+        "content": response_text,
+        "token_usage": token_usage
+    }
 
 if __name__ == "__main__":
     # Test

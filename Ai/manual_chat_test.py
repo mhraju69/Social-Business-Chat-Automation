@@ -50,18 +50,27 @@ def main():
                 continue
 
             # Call the actual service function
-            response = get_ai_response(
+            response_data = get_ai_response(
                 company_id=company_id,
                 query=user_input,
                 history=history,
                 tone=tone
             )
 
-            print(f"AI: {response}\n")
+            # Handle response (it's now a dict)
+            if isinstance(response_data, dict):
+                content = response_data.get("content", "")
+                usage = response_data.get("token_usage", {})
+                print(f"AI: {content}")
+                print(f"   [Token Usage] In: {usage.get('input_tokens')}, Out: {usage.get('output_tokens')}, Total: {usage.get('total_tokens')}\n")
+            else:
+                # Fallback if something went wrong or format didn't change as expected
+                content = str(response_data)
+                print(f"AI: {content}\n")
 
             # Update history
             history.append({"role": "user", "content": user_input})
-            history.append({"role": "assistant", "content": response})
+            history.append({"role": "assistant", "content": content})
 
         except KeyboardInterrupt:
             print("\nExiting chat...")
