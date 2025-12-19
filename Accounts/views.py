@@ -178,6 +178,15 @@ class AddEmployeeView(APIView):
             return Response({'error': 'Company not found.'}, status=404)
         
         employees = Employee.objects.filter(company=company)
+
+        plan = Subscriptions.objects.filter(company=company).first()
+
+        if not check_plan(company):
+            return Response({'error': 'No valid plan found'}, status=404)
+        
+        if not plan.user_limit <= len(employees):
+            return Response({'error': 'User limit exceeded, please upgrade your plan to add more Employees.'}, status=400)
+        
         employee_data = []
         for emp in employees:
             employee_data.append({

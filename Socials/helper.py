@@ -1,10 +1,12 @@
 from django.utils import timezone
-from django.conf import settings
 from .models import *
-from openai import OpenAI
 from .consumers import broadcast_message
 import requests
 from Ai.ai_service import get_ai_response
+from django.core.cache import cache
+from django_redis import get_redis_connection
+from datetime import datetime
+
 
 def send_message(profile: ChatProfile, client_obj: ChatClient, message_text):
     try:
@@ -61,3 +63,42 @@ def send_message(profile: ChatProfile, client_obj: ChatClient, message_text):
         ChatMessage.objects.create(room=room, type="outgoing", text=message_text)
         return {"error": str(e)}
 
+def check_token_count(company_id, count):
+    redis = get_redis_connection("default")
+    cache_key = f"company_token_{company_id}"
+
+    token_count = redis.get(cache_key)
+    
+    if token_count is None:
+        plan = Subscriptions.objects.filter(company__id=company_id).first()
+
+        if not plan or not plan.is_active or plan.end < datetime.now():
+            return False
+
+        token_count = plan.token_count
+        redis.set(cache_key, token_count)
+
+    with redis.pipeline() as pipe:
+        while True:
+            try:
+                pipe.watch(cache_key)
+                current_tokens = int(pipe.get(cache_key))
+
+                if current_tokens < count:
+                    pipe.unwatch()
+                    return False
+
+                new_token_count = current_tokens - count
+
+                pipe.multi()
+                pipe.set(cache_key, new_token_count)
+                pipe.execute()
+                break
+            except Exception:
+                continue
+
+    Subscriptions.objects.filter(company__id=company_id).update(
+        token_count=new_token_count
+    )
+
+    return True

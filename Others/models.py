@@ -111,20 +111,7 @@ class GoogleCalendar(models.Model):
 
     def __str__(self):
         return f"{self.company.name} - Google Connected"
-    
-class ChatBot(models.Model):
-    user = models.OneToOneField(settings.AUTH_USER_MODEL, related_name='chat_bots',  on_delete=models.CASCADE)
-    name = models.CharField(max_length=100, verbose_name="Bot Name")
-    language = models.CharField(max_length=50,default='English', verbose_name="Bot Language")
-    description = models.TextField(blank=True, null=True, verbose_name="Bot Description")
-    is_active = models.BooleanField(default=False, verbose_name="Is Bot Active")
-    formality_level = models.PositiveIntegerField(default=5)  # 1–10 scale
-    created_at = models.DateTimeField(auto_now_add=True)
-    updated_at = models.DateTimeField(auto_now=True)
-
-    def __str__(self):
-        return f"{self.name} - {self.user.email}"
-       
+           
 class OpeningHours(models.Model):
     DAYS_OF_WEEK = [
         ('mon', 'Monday'),

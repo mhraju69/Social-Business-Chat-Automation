@@ -41,7 +41,7 @@ def get_msg_history(room_id):
     return formatted_messages
     
 
-@shared_task
+@shared_task(ignore_result=True)
 def send_booking_reminder(booking_id):
     """Send booking reminder via email/SMS"""
     try:
@@ -95,7 +95,7 @@ def send_booking_reminder(booking_id):
         traceback.print_exc()
         raise
 
-@shared_task
+@shared_task(ignore_result=True)
 def wait_and_reply(room_id, delay):
     """
     Waits for 'delay' seconds to batch incoming messages for a room,
@@ -178,3 +178,85 @@ def wait_and_reply(room_id, delay):
 
     print(f"🎉 [{room.profile.platform}] Reply sent successfully for room {room.id}")
     return f"Reply sent for room {room.id}"
+
+@shared_task
+def cleanup_system():
+    """
+    Periodic task to clean up:
+    1. Useless Redis token cache for inactive companies.
+    2. Extra UserSession data (keep only last 20 per user).
+    3. Extra ChatMessage data (keep only last 20 per room).
+    4. Extra Alert data (keep only last 20 per user).
+    5. Reset stuck ChatRooms.
+    """
+    from django_redis import get_redis_connection
+    from Finance.models import Subscriptions
+    from Others.models import UserSession, Alert
+    from Socials.models import ChatRoom, ChatMessage
+    from django.db.models import Count
+    from django.utils import timezone
+    
+    # 1. Cleanup Token Cache
+    try:
+        redis = get_redis_connection("default")
+        for key in redis.scan_iter("company_token_*"):
+            try:
+                # Key is usually company_token_<id>
+                # Using decode() as redis keys can be bytes
+                key_str = key.decode() if isinstance(key, bytes) else key
+                company_id = key_str.split("_")[-1]
+                # Check if company has an active plan
+                plan = Subscriptions.objects.filter(company_id=company_id, is_active=True, end__gt=timezone.now()).exists()
+                if not plan:
+                    redis.delete(key)
+                    print(f"🗑️ Deleted useless token cache for company {company_id}")
+            except Exception as e:
+                print(f"Error checking token key {key}: {e}")
+    except Exception as e:
+        print(f"Redis connection error during cleanup: {e}")
+
+    # 2. Cleanup User Sessions (Keep 20 per user)
+    users_with_many_sessions = UserSession.objects.values('user').annotate(counts=Count('id')).filter(counts__gt=20)
+    for entry in users_with_many_sessions:
+        user_id = entry['user']
+        sessions_to_keep = UserSession.objects.filter(user_id=user_id).order_by('-last_active')[:20].values_list('id', flat=True)
+        deleted_count = UserSession.objects.filter(user_id=user_id).exclude(id__in=list(sessions_to_keep)).delete()[0]
+        print(f"🗑️ Deleted {deleted_count} extra sessions for user {user_id}")
+
+    # 3. Cleanup Chat Messages (Keep 20 per room)
+    rooms_with_many_messages = ChatRoom.objects.annotate(counts=Count('messages')).filter(counts__gt=20)
+    for room in rooms_with_many_messages:
+        msgs_to_keep = ChatMessage.objects.filter(room=room).order_by('-timestamp')[:100].values_list('id', flat=True)
+        deleted_count = ChatMessage.objects.filter(room=room).exclude(id__in=list(msgs_to_keep)).delete()[0]
+        print(f"🗑️ Deleted {deleted_count} extra messages for room {room.id}")
+
+    # 4. Cleanup Alerts (Keep 20 per user)
+    users_with_many_alerts = Alert.objects.values('user').annotate(counts=Count('id')).filter(counts__gt=20)
+    for entry in users_with_many_alerts:
+        user_id = entry['user']
+        alerts_to_keep = Alert.objects.filter(user_id=user_id).order_by('-time')[:20].values_list('id', flat=True)
+        deleted_count = Alert.objects.filter(user_id=user_id).exclude(id__in=list(alerts_to_keep)).delete()[0]
+        print(f"🗑️ Deleted {deleted_count} extra alerts for user {user_id}")
+
+    # 5. Cleanup Bookings (Keep 20 per company)
+    from Others.models import Booking
+    from Accounts.models import Company
+    companies_with_many_bookings = Booking.objects.values('company').annotate(counts=Count('id')).filter(counts__gt=20)
+    for entry in companies_with_many_bookings:
+        company_id = entry['company']
+        if company_id:
+            bookings_to_keep = Booking.objects.filter(company_id=company_id).order_by('-start_time')[:300].values_list('id', flat=True)
+            deleted_count = Booking.objects.filter(company_id=company_id).exclude(id__in=list(bookings_to_keep)).delete()[0]
+            print(f"🗑️ Deleted {deleted_count} extra bookings for company {company_id}")
+
+    # 6. Reset stuck ChatRooms (stuck for > 30 mins)
+    stuck_rooms = ChatRoom.objects.filter(
+        is_waiting_reply=True,
+        last_incoming_time__lt=timezone.now() - timezone.timedelta(minutes=30)
+    )
+    stuck_count = stuck_rooms.count()
+    stuck_rooms.update(is_waiting_reply=False)
+    if stuck_count > 0:
+        print(f"🔓 Reset {stuck_count} stuck chat rooms")
+
+    return "System cleanup successful"

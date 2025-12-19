@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 from datetime import timedelta
+from celery.schedules import crontab
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -38,10 +39,12 @@ ALLOWED_HOSTS = ['*']
 # settings.py
 CSRF_TRUSTED_ORIGINS = [
     "https://ape-in-eft.ngrok-free.app",
-    'http://localhost:3000'
+    'http://localhost:3000',
+    'https://wahejan.vercel.app'
 ]
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",  
+    "http://localhost:3000",
+    'https://wahejan.vercel.app'
 ]
 DEBUG = True
 #DEBUG = False
@@ -206,10 +209,27 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = 1024 ** 4
 CELERY_BROKER_URL = 'redis://redis:6379/0'  
 CELERY_RESULT_BACKEND = 'redis://redis:6379/0'
 
+CELERY_BEAT_SCHEDULE = {
+    'cleanup-system-daily': {
+        'task': 'Others.task.cleanup_system',
+        'schedule': crontab(hour=0, minute=0),
+    },
+}
+
 
 SPECTACULAR_SETTINGS = {
     'TITLE': 'TalkFusion API',
     'DESCRIPTION': 'API documentation for TalkFusion',
     'VERSION': '1.0.0',
     'SERVE_INCLUDE_SCHEMA': False,
+}
+
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': os.getenv('REDIS_URL', 'redis://redis:6379/1'),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        }
+    }
 }

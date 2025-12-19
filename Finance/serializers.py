@@ -39,17 +39,10 @@ class PaymentSerializer(serializers.ModelSerializer):
         model = Payment
         fields = '__all__'
 
-class PlanValueSerializers(serializers.ModelSerializer):
-    class Meta:
-        model = PlanValue
-        fields = ['value'] 
-
 class PlanSerializers(serializers.ModelSerializer):
-    values = PlanValueSerializers(source='plan_value', many=True)
-
     class Meta:
         model = Plan
-        fields = ['name', 'duration', 'values']
+        fields = ['id','name', 'duration', 'price','msg_limit','user_limit','token_limit']
         
 class SubscriptionSerializer(serializers.ModelSerializer):
     plan_name = serializers.CharField(source='plan.get_name_display', read_only=True)
@@ -58,12 +51,5 @@ class SubscriptionSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Subscriptions
-        fields = ['id', 'company', 'plan', 'plan_name', 'plan_duration', 'plan_price', 'start', 'end', 'active']
+        fields = ['id', 'company', 'plan', 'plan_name', 'plan_duration', 'plan_price', 'start', 'end', 'auto_renew', 'active']
         read_only_fields = ['company', 'start', 'end', 'active']
-
-    def update(self, instance, validated_data):
-        # Allow only 'plan' to be updated for existing subscriptions
-        if 'plan' in validated_data:
-            instance.plan = validated_data.get('plan', instance.plan)
-            instance.save()
-        return instance

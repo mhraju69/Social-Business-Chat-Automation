@@ -88,13 +88,13 @@ class Company(models.Model):
     city = models.CharField(max_length=100, blank=True, null=True)
     country = models.CharField(max_length=100, blank=True, null=True)
 
-    system_language = models.CharField(max_length=50, default='English')
+    language = models.CharField(max_length=50, default='English')
 
     # AI training
-    training_files = models.FileField(upload_to='ai_training/', blank=True, null=True)
+    tone = models.CharField(max_length=50, default='professional')
 
     # Website link
-    website = models.URLField(blank=True, null=True)
+    website = models.CharField(max_length=255, blank=True, null=True)
 
     # Company summary
     summary = models.TextField(blank=True, null=True)
@@ -133,6 +133,7 @@ class Service(models.Model):
     name = models.CharField(max_length=255, verbose_name="Service Name")
     description = models.TextField(blank=True, null=True, verbose_name="Service Description")
     price = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Service Price")
+    duration = models.IntegerField(blank=True, null=True, verbose_name="Service Duration")
     start_time = models.TimeField(blank=True, null=True)
     end_time = models.TimeField(blank=True, null=True)
     def __str__(self):

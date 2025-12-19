@@ -140,3 +140,9 @@ def get_location(ip):
         return f"{response['city']}, {response['country']}"
     except:
         return "Unknown"
+        
+def check_plan(company):
+    plan = Subscriptions.objects.filter(company=company).first()
+    if not plan or not plan.is_active or plan.end < datetime.now():
+        return False
+    return True

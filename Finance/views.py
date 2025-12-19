@@ -60,12 +60,7 @@ class GetPlans(APIView):
     serializer_class = PlanSerializers
 
     def get(self, request):
-        user = request.user
-        if user.role == 'admin':
-            plans = Plan.objects.all()  
-        else:
-            plans = Plan.objects.filter(custom=True).exclude(custom=True)
-
+        plans = Plan.objects.all()  
         serializer = self.serializer_class(plans, many=True)  
         return Response(serializer.data)
     
@@ -292,3 +287,19 @@ class CheckPlan(APIView):
         
         return Response(SubscriptionSerializer(paln,many=True).data)
     
+class CreateSubscriptionsView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def post(self, request):
+        company = Company.objects.filter(user=request.user).first()
+        if not company:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+        plan = request.data.get('plan_id')
+        if not plan:
+            return Response({"error": "Plan ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+        plan = Plan.objects.filter(id=plan).first()
+        if not plan:
+            return Response({"error": "Plan not found"}, status=status.HTTP_404_NOT_FOUND)
+        subscriptions = Subscriptions.objects.create(company=company, plan=plan)
+        serializer = SubscriptionSerializer(subscriptions)
+        return Response(serializer.data)

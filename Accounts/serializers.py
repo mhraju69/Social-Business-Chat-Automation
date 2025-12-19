@@ -110,7 +110,7 @@ class CompanySerializer(serializers.ModelSerializer):
 class ServiceSerializer(serializers.ModelSerializer):
     class Meta:
         model = Service
-        fields = ['id','name', 'description', 'price', 'start_time','end_time']
+        fields = ['id','name', 'description', 'price', 'duration', 'start_time','end_time']
         read_only_fields = ['company']
 
 class EmployeeSerializer(serializers.ModelSerializer):

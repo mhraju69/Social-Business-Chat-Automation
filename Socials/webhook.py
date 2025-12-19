@@ -6,7 +6,8 @@ from django.utils import timezone
 import json, requests
 from Others.task import wait_and_reply
 from .models import ChatProfile, ChatClient, ChatRoom, ChatMessage
-from .consumers import broadcast_message
+from .consumers import broadcast_message, send_alert
+from .helper import check_token_count
 User = get_user_model()
 
 @csrf_exempt
@@ -59,6 +60,11 @@ def unified_webhook(request, platform):
                 client_id = msg.get("from")
                 text = msg.get("text", {}).get("body", "")
 
+                # Token count check
+                # if not check_token_count(profile.user.company.id, 1):
+                #     send_alert(profile.user, "Token Limit Reached", "Your token balance is low. Please upgrade your plan to continue using the bot.", type="error")
+                #     return JsonResponse({"status": "error", "message": "Token limit reached."}, status=400)
+
             elif platform == "facebook":
                 print(f"📘 [Facebook] Webhook received")
                 entry = data.get("entry", [])
@@ -91,6 +97,11 @@ def unified_webhook(request, platform):
                 text = msg_event.get("message", {}).get("text", "")
                 print(f"📘 [Facebook] Message from {client_id}: {text}")
 
+                # Token count check
+                if not check_token_count(profile.user.company.id, 1):
+                    send_alert(profile.user, "Token Limit Reached", "Your token balance is low. Please upgrade your plan to continue using the bot.", type="error")
+                    return JsonResponse({"status": "error", "message": "Token limit reached."}, status=400)
+
             elif platform == "instagram":
                 entry = data.get("entry", [])
                 if not entry:
@@ -114,6 +125,11 @@ def unified_webhook(request, platform):
                 change = changes[0].get("value", {})
                 client_id = change.get("from", {}).get("id")
                 text = change.get("message") or change.get("text", "")
+
+                # Token count check
+                if not check_token_count(profile.user.company.id, 1):
+                    send_alert(profile.user, "Token Limit Reached", "Your token balance is low. Please upgrade your plan to continue using the bot.", type="error")
+                    return JsonResponse({"status": "error", "message": "Token limit reached."}, status=400)
 
             else:
                 return JsonResponse({"error": "Unknown platform"})

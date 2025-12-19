@@ -108,3 +108,4 @@ python-docx
 pytz
 qdrant-client
 langchain_openai
+django-redis

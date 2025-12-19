@@ -12,9 +12,9 @@ from dateutil.relativedelta import relativedelta
 
 class Plan(models.Model):
     PLAN = [
-        ("basic", "Basic"),
-        ("business", "Business"),
-        ("premium", "Premium"),
+        ("essential", "Essential"),
+        ("growth", "Growth"),
+        ("enterprise", "Enterprise Custom"),
     ]
     DURATION = [
         ("days", "Daily"),
@@ -22,41 +22,32 @@ class Plan(models.Model):
         ("years", "Yearly"),
     ]
 
-    name = models.CharField(max_length=20, choices=PLAN)
+    name = models.CharField(max_length=20, choices=PLAN,unique=True)
     price = models.CharField(max_length=10)
-    duration = models.CharField(max_length=10, choices=DURATION)
+    msg_limit = models.IntegerField(default=0)
+    duration = models.CharField(max_length=20, choices=DURATION)
+    user_limit = models.IntegerField(default=0)
+    token_limit = models.IntegerField(default=0)
     custom = models.BooleanField(default=False)
-
-    class Meta:
-        unique_together = ('name', 'duration')
-        verbose_name = "Plan"
-        verbose_name_plural = "Plans"
 
     def __str__(self):
         return f"{self.get_name_display()} ({self.get_duration_display()})"
 
-
-class PlanValue(models.Model):
-    plan = models.ForeignKey(Plan, on_delete=models.CASCADE, related_name='plan_value')
-    value = models.CharField(max_length=100)
-
-    def __str__(self):
-        return f"{self.plan.name} - {self.value}"
-
-
 class Subscriptions(models.Model):
     company = models.ForeignKey(Company, related_name='subscriptions', on_delete=models.CASCADE)
     plan = models.ForeignKey(Plan, on_delete=models.CASCADE)
-    start = models.DateTimeField(auto_now_add=True)
+    start = models.DateTimeField(blank=True, null=True)
     end = models.DateTimeField(blank=True, null=True)
     active = models.BooleanField(default=True)
+    auto_renew = models.BooleanField(default=False)
+    history = HistoricalRecords()
 
     def save(self, *args, **kwargs):
+        if not self.start:
+            self.start = timezone.now()
 
-        # Fetch plan safely using plan_id
-        plan_obj = None
-        if self.plan_id:
-            plan_obj = Plan.objects.get(id=self.plan_id)
+        # Fetch plan safely
+        plan_obj = self.plan
 
         # Auto-set end date based on plan.duration
         if not self.end and plan_obj:
@@ -80,7 +71,6 @@ class Subscriptions(models.Model):
 
     def __str__(self):
         return f"{self.company} - {self.plan.name}"
-
 
 class StripeCredential(models.Model):
     company = models.OneToOneField(Company,related_name='stripe',  on_delete=models.CASCADE)
