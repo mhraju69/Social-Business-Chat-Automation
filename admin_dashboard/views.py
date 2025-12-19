@@ -15,6 +15,8 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from Accounts.permissions import IsAdmin
 from drf_spectacular.utils import extend_schema_view, extend_schema, inline_serializer
 from rest_framework import serializers
+from .serializers import SimpleUserSerializer, AdminCompanySerializer
+from rest_framework.pagination import PageNumberPagination
 class DashboardView(generics.GenericAPIView):
     permission_classes = [IsAdmin]
 
@@ -98,6 +100,11 @@ class DashboardView(generics.GenericAPIView):
         }
         return Response(response_data)
 
+class UserListPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+
 @extend_schema_view(
     get=extend_schema(
         tags=["Admin Dashboard"],
@@ -105,9 +112,10 @@ class DashboardView(generics.GenericAPIView):
     )
 )
 class UserListView(generics.ListAPIView):
-    queryset = User.objects.all()
-    serializer_class = UserSerializer
+    queryset = User.objects.filter(role__in=['user', 'employee'], company__name__isnull=False).prefetch_related('company')
+    serializer_class = SimpleUserSerializer
     permission_classes = [IsAdmin]
+    pagination_class = UserListPagination
 
     filter_backends = [SearchFilter, OrderingFilter]
     search_fields = ['name', 'email', 'phone']
@@ -330,6 +338,10 @@ class UserChannelsView(APIView):
         except User.DoesNotExist:
             return Response({"error": f"User with id {user_id} does not exist."}, status=404)
 
+class CompanyListPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
 
 @extend_schema_view(
     get=extend_schema(
@@ -339,12 +351,23 @@ class UserChannelsView(APIView):
 )
 class CompanyListView(generics.ListAPIView):
     queryset = Company.objects.all()
-    serializer_class = CompanySerializer
+    serializer_class = AdminCompanySerializer
     permission_classes = [IsAdmin]
+    pagination_class = CompanyListPagination
 
     filter_backends = [SearchFilter, OrderingFilter]
-    search_fields = ['name', 'email', 'phone']
-    ordering_fields = ['created_at', 'name', 'email']
+    search_fields = ['name', 'email']
+    ordering_fields = ['created_at', 'name']
+    
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            if is_active.lower() == 'true':
+                queryset = queryset.filter(user__is_active=True)
+            elif is_active.lower() == 'false':
+                queryset = queryset.filter(user__is_active=False)
+        return queryset
 
 class PerformanceAnalyticsAPIView(generics.GenericAPIView):
     permission_classes = [IsAdmin]
@@ -356,14 +379,10 @@ class PerformanceAnalyticsAPIView(generics.GenericAPIView):
         responses=inline_serializer(
             name="PerformanceAnalyticsResponse",
             fields={
-                "total_message_sent": serializers.IntegerField(),
-                "total_message_received": serializers.IntegerField(),
-                "payments_via_chat": serializers.IntegerField(),
-                "monthly_revenue": serializers.FloatField(),
+                "total_message_sent": serializers.DictField(),
+                "total_message_received": serializers.DictField(),
+                "monthly_revenue": serializers.DictField(),
                 "total_revenue": serializers.FloatField(),
-                "total_costs": serializers.FloatField(),
-                "gross_profit": serializers.FloatField(),
-                "arpu": serializers.FloatField(),
                 "time_scope": serializers.CharField(),
             }
         ),
@@ -376,22 +395,31 @@ class PerformanceAnalyticsAPIView(generics.GenericAPIView):
 
         total_message_sent = 0
         total_message_received = 0
-        payments_via_chat = 0
         monthly_revenue = 0
-        total_revienue = Payment.objects.aggregate(total=Sum('amount'))['total'] or 0
-        total_costs = 0  # Placeholder for cost calculation
-        gross_profit = total_revienue - total_costs
-        arpu = total_revienue / User.objects.count() if User.objects.count() > 0 else 0
+        total_revenue = Payment.objects.aggregate(total=Sum('amount'))['total'] or 0
+
+
+        # previous month data
+        message_sent_prev = 0
+        message_received_prev = 0
+        monthly_revenue_prev = 0
+
+
 
         data = {
-            "total_message_sent": total_message_sent,
-            "total_message_received": total_message_received,
-            "payments_via_chat": payments_via_chat,
-            "monthly_revenue": monthly_revenue,
-            "total_revenue": total_revienue,
-            "total_costs": total_costs,
-            "gross_profit": gross_profit,
-            "arpu": arpu, 
+            "total_message_sent": {
+                "current": total_message_sent,
+                "previous": message_sent_prev
+            },
+            "total_message_received": {
+                "current": total_message_received,
+                "previous": message_received_prev
+            },
+            "monthly_revenue": {
+                "current": monthly_revenue,
+                "previous": monthly_revenue_prev
+            },
+            "total_revenue": total_revenue,
             "time_scope": time_scope,
         }
         return Response(data)
