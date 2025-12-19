@@ -67,44 +67,52 @@ class GetPlans(APIView):
 @csrf_exempt
 @api_view(["POST"])
 @permission_classes([AllowAny])
-def create_checkout_session(request):
+def create_checkout_session_for_service(request):
     try:
-        type = request.data.get("type")
         company_id = request.data.get("company_id")
         email = request.data.get("email")
-        plan_id = request.data.get("plan_id")
         amount = request.data.get("amount")
         reason = request.data.get("reason")
-        method = request.data.get("method", "web")
 
         # Call stripe function
-        payment = create_stripe_checkout(
-            type,
+        payment = create_stripe_checkout_for_service(
             company_id,
             email,
-            plan_id,
             amount,
-            reason,
-            method
+            reason
         )
 
-        # Validate company
-        if not Company.objects.filter(id=company_id).exists():
-            return Response({"error": "Company not found"}, status=404)
-
-        # Validate plan only for subscription payments
-        if type == "subscriptions":
-            if not Plan.objects.filter(id=plan_id).exists():
-                return Response({"error": "Plan not found"}, status=404)
-
-        return Response({"redirect_url": payment.url}, status=303)
+        return Response({"redirect_url": payment.url}, status=status.HTTP_303_SEE_OTHER)
 
     except ValueError as e:
         return Response({"error": str(e)}, status=400)
     except StripeCredential.DoesNotExist:
         return Response({"error": "Stripe credentials not found"}, status=404)
 
-    
+@csrf_exempt
+@api_view(["POST"])
+@permission_classes([AllowAny])
+def create_checkout_session_for_subscription(request):
+    try:
+        company_id = request.data.get("company_id")
+        plan_id = request.data.get("plan_id")
+        auto_renew = request.data.get("auto_renew")
+
+        # Call stripe function
+        payment = create_stripe_checkout_for_subscription(
+            company_id,
+            plan_id,
+            auto_renew
+        )
+
+        return Response({"redirect_url": payment.url}, status=status.HTTP_303_SEE_OTHER)
+
+    except ValueError as e:
+        return Response({"error": str(e)}, status=400)
+    except StripeCredential.DoesNotExist:
+        return Response({"error": "Stripe credentials not found"}, status=404)
+
+
 @csrf_exempt
 def stripe_webhook(request):
     payload = request.body
@@ -141,8 +149,12 @@ def stripe_webhook(request):
     payment_id = metadata.get('payment_id')
     company_id = metadata.get('company_id')
     plan_id = metadata.get('plan_id')
+    auto_renew_meta = metadata.get('auto_renew')
+    
+    # Convert auto_renew string to boolean
+    auto_renew = str(auto_renew_meta).lower() == 'true'
 
-    logger.info(f"Webhook metadata - payment_id: {payment_id}, company_id: {company_id}, plan_id: {plan_id}")
+    logger.info(f"Webhook metadata - payment_id: {payment_id}, company_id: {company_id}, plan_id: {plan_id}, auto_renew: {auto_renew}")
 
     # Fetch objects
     payment = Payment.objects.filter(id=payment_id).first()
@@ -164,15 +176,46 @@ def stripe_webhook(request):
     # ✔ SUCCESSFUL PAYMENT
     # ----------------------------------------------------------------------
     if event['type'] == 'checkout.session.completed':
+        # Set API key for retrieval - use system key as default
+        stripe.api_key = settings.STRIPE_SECRET_KEY
+        if payment.type == "services":
+            try:
+                cred = StripeCredential.objects.get(company=company)
+                stripe.api_key = cred.api_key
+            except StripeCredential.DoesNotExist:
+                pass
+
         try:
             with transaction.atomic():
                 # Update payment status
                 payment.status = "success"
                 payment.payment_date = timezone.now()
-                payment.transaction_id = data.get('id')
+                # Store PaymentIntent ID as transaction_id if available
+                payment.transaction_id = data.get('payment_intent') or data.get('id')
                 payment.save()
                 
                 logger.info(f"✅ Payment {payment.id} status updated to SUCCESS")
+
+                # Save Stripe Customer and Payment Method for future auto-renewal
+                customer_id = data.get('customer')
+                if customer_id and company:
+                    company.stripe_customer_id = customer_id
+                    
+                    # Try to get payment method from the session or payment intent
+                    payment_intent_id = data.get('payment_intent')
+                    if payment_intent_id:
+                        try:
+                            pi = stripe.PaymentIntent.retrieve(payment_intent_id)
+                            if pi.get('payment_method'):
+                                company.stripe_payment_method_id = pi.get('payment_method')
+                                logger.info(f"💳 Saved Payment Method {pi.get('payment_method')} for Company {company.id}")
+                        except Exception as e:
+                            logger.error(f"Error retrieving PaymentIntent {payment_intent_id} for PM: {e}")
+                    
+                    company.save()
+                    logger.info(f"👥 Saved Stripe Customer {customer_id} for Company {company.id}")
+                else:
+                    logger.warning(f"⚠️ No customer_id found in Stripe data for company {company_id if company_id else 'unknown'}")
 
                 # =================== SUBSCRIPTION PAYMENT =========================
                 if payment.type == "subscriptions":
@@ -183,20 +226,19 @@ def stripe_webhook(request):
                         company=company,
                         defaults={
                             "plan": plan,
+                            "auto_renew": auto_renew,
                         }
                     )
 
                     if not created:
                         # Subscription already exists → upgrade/renew
                         subscription.plan = plan
+                        subscription.auto_renew = auto_renew
                         subscription.start = timezone.now()
+                        subscription.active = True # Ensure it is active
                         logger.info(f"Updated existing subscription {subscription.id}")
                     else:
                         logger.info(f"Created new subscription {subscription.id}")
-
-                    # Set end date automatically from plan duration
-                    if hasattr(plan, "duration_days"):
-                        subscription.end = subscription.start + timedelta(days=plan.duration_days)
 
                     subscription.save()
 

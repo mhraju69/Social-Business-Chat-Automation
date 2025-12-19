@@ -66,6 +66,7 @@ class DashboardView(APIView):
 
         payments_qs = Payment.objects.filter(
             company=company,
+            type="services",
             payment_date__gte=start_utc,
             payment_date__lt=end_utc,
         )

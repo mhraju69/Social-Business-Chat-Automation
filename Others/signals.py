@@ -1,7 +1,7 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from .models import Booking
-from Finance.helper import create_stripe_checkout
+from Finance.helper import create_stripe_checkout_for_service
 from django.utils import timezone
 from .task import send_booking_reminder
 from .helper import *
@@ -10,13 +10,11 @@ from .helper import *
 def create_payment_for_booking(sender, instance, created, **kwargs):
     if created and not instance.payment and instance.price:
         try:
-            payment = create_stripe_checkout(
-                type="services",
+            payment = create_stripe_checkout_for_service(
                 company_id=instance.company.id,
                 email=instance.client,
                 amount=instance.price,
-                reason=f"Payment for {instance.title}",
-                method="app"
+                reason=f"Payment for {instance.title}"
             )
             instance.payment = payment
             instance.save()

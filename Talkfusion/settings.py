@@ -214,6 +214,10 @@ CELERY_BEAT_SCHEDULE = {
         'task': 'Others.task.cleanup_system',
         'schedule': crontab(hour=0, minute=0),
     },
+    'auto-renew-subscriptions-daily': {
+        'task': 'Finance.task.check_subscription_renewals',
+        'schedule': crontab(hour=0, minute=0),
+    },
 }
 
 
