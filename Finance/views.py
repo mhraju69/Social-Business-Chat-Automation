@@ -205,10 +205,13 @@ def stripe_webhook(request):
                     payment_intent_id = data.get('payment_intent')
                     if payment_intent_id:
                         try:
-                            pi = stripe.PaymentIntent.retrieve(payment_intent_id)
+                            # Use the same API key used for the session
+                            pi = stripe.PaymentIntent.retrieve(payment_intent_id, api_key=stripe.api_key)
                             if pi.get('payment_method'):
                                 company.stripe_payment_method_id = pi.get('payment_method')
                                 logger.info(f"💳 Saved Payment Method {pi.get('payment_method')} for Company {company.id}")
+                            else:
+                                logger.warning(f"⚠️ PaymentMethod not found on PaymentIntent {payment_intent_id}")
                         except Exception as e:
                             logger.error(f"Error retrieving PaymentIntent {payment_intent_id} for PM: {e}")
                     

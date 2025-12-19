@@ -145,6 +145,25 @@ def create_stripe_checkout_for_subscription(
         "auto_renew": str(auto_renew).lower(),
     }
 
+    # If auto-renewal is enabled, we tell Stripe to save the payment method for off-session use
+    is_auto_renew_enabled = str(auto_renew).lower() == 'true'
+
+    # Ensure company has a Stripe Customer ID before session creation
+    # This is the most reliable way to get a customer_id back in the webhook
+    if not company.stripe_customer_id:
+        try:
+            stripe_client.api_key = api_key
+            customer = stripe_client.Customer.create(
+                email=company.user.email,
+                name=company.name,
+                metadata={"company_id": str(company.id)}
+            )
+            company.stripe_customer_id = customer.id
+            company.save()
+            print(f"DEBUG: Created new Stripe Customer ID: {customer.id}")
+        except Exception as e:
+            print(f"DEBUG: Error creating Stripe customer: {e}")
+
     # ---------------- CREATE STRIPE CHECKOUT ----------------
     checkout_args = {
         "payment_method_types": ["card"],
@@ -154,6 +173,17 @@ def create_stripe_checkout_for_subscription(
         "cancel_url": cancel_url,
         "metadata": metadata,
     }
+
+    if company.stripe_customer_id:
+        checkout_args["customer"] = company.stripe_customer_id
+    else:
+        # Emergency fallback
+        checkout_args["customer_email"] = company.user.email
+
+    if is_auto_renew_enabled:
+        checkout_args["payment_intent_data"] = {
+            "setup_future_usage": "off_session"
+        }
 
     session = stripe_client.checkout.Session.create(**checkout_args)
 
