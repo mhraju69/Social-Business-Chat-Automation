@@ -72,16 +72,6 @@ class Subscriptions(models.Model):
     def __str__(self):
         return f"{self.company} - {self.plan.name}"
 
-class StripeCredential(models.Model):
-    company = models.OneToOneField(Company,related_name='stripe',  on_delete=models.CASCADE)
-    api_key = models.CharField(max_length=255, verbose_name="Stripe API Key")
-    publishable_key = models.CharField(max_length=255, verbose_name="Stripe Publishable Key")
-    webhook_secret = models.CharField(max_length=255, verbose_name="Stripe Webhook Secret")
-
-    history = HistoricalRecords()
-
-    def __str__(self):
-        return self.company.user.email
     
 class Payment(models.Model):
     TYPE = [("subscriptions","Subscriptions"),("services","Services")]
@@ -100,6 +90,7 @@ class Payment(models.Model):
     status = models.CharField(max_length=20,choices=STATUS,default="pending")
     created_at = models.DateTimeField(auto_now_add=True)
     url = models.URLField(null=True,blank=True)
+    invoice_url = models.URLField(null=True,blank=True)
     history = HistoricalRecords()
 
     def __str__(self):

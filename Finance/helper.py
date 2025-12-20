@@ -1,19 +1,11 @@
-from .models import Company, StripeCredential, Payment, Plan
+from .models import Company, Payment, Plan
 from django.http import Http404
 from django.conf import settings
 import stripe
 
-def get_stripe_client(company=None, use_env=False):
-    """Return Stripe client configuration."""
-    if use_env:
-        # Use global environment Stripe credentials
-        return stripe, settings.STRIPE_SECRET_KEY, settings.STRIPE_WEBHOOK_SECRET
-
-    if not company:
-        raise ValueError("Company is required for company-based Stripe credentials")
-
-    cred = StripeCredential.objects.get(company=company)
-    return stripe, cred.api_key, cred.webhook_secret
+def get_stripe_client():
+    """Return platform Stripe client configuration."""
+    return stripe, settings.STRIPE_SECRET_KEY, settings.STRIPE_WEBHOOK_SECRET
 
 def create_stripe_checkout_for_service(
     company_id,
@@ -26,11 +18,8 @@ def create_stripe_checkout_for_service(
     except Company.DoesNotExist:
         raise ValueError("Company not found")
 
-    # Try to get company-specific Stripe credentials first, fallback to environment if not found
-    try:
-        stripe_client, api_key, webhook_secret = get_stripe_client(company=company, use_env=False)
-    except (StripeCredential.DoesNotExist, ValueError):
-        stripe_client, api_key, webhook_secret = get_stripe_client(company=company, use_env=True)
+    stripe_client, api_key, webhook_secret = get_stripe_client()
+    stripe_client.api_key = api_key
 
     # ---------------- SERVICE PAYMENT ----------------
     if not email:
@@ -79,7 +68,27 @@ def create_stripe_checkout_for_service(
         "success_url": success_url,
         "cancel_url": cancel_url,
         "metadata": metadata,
+        "invoice_creation": {"enabled": True},
     }
+
+    # If company has a connected account, we check if it's ready to receive money
+    if company.stripe_connect_id:
+        try:
+            # Check account status on Stripe
+            connected_acc = stripe_client.Account.retrieve(company.stripe_connect_id)
+            
+            # Only transfer if the account is verified for transfers
+            if connected_acc.capabilities.get('transfers') == 'active':
+                checkout_args["payment_intent_data"] = {
+                    "transfer_data": {
+                        "destination": company.stripe_connect_id,
+                        "amount": int(float(amount) * 100),
+                    }
+                }
+            else:
+                print(f"⚠️ Warning: Company {company.id} has a connect_id but 'transfers' capability is NOT active yet.")
+        except Exception as e:
+            print(f"❌ Error checking connect account status: {e}")
 
     # Pass existing customer or email
     if company.stripe_customer_id:
@@ -107,7 +116,7 @@ def create_stripe_checkout_for_subscription(
     except Company.DoesNotExist:
         raise ValueError("Company not found")
 
-    stripe_client, api_key, webhook_secret = get_stripe_client(company=company, use_env=True)
+    stripe_client, api_key, webhook_secret = get_stripe_client()
     plan = Plan.objects.filter(id=plan_id).first()
 
     if not plan:
@@ -172,6 +181,7 @@ def create_stripe_checkout_for_subscription(
         "success_url": success_url,
         "cancel_url": cancel_url,
         "metadata": metadata,
+        "invoice_creation": {"enabled": True},
     }
 
     if company.stripe_customer_id:
@@ -193,6 +203,44 @@ def create_stripe_checkout_for_subscription(
     return payment
 
 
+
+def create_stripe_connect_account(company_id):
+    """
+    Create a Stripe Express account for a company and return an onboarding link.
+    """
+    try:
+        company = Company.objects.get(id=company_id)
+    except Company.DoesNotExist:
+        raise ValueError("Company not found")
+
+    stripe.api_key = settings.STRIPE_SECRET_KEY
+
+    # 1. Create the Connect Account if it doesn't exist
+    if not company.stripe_connect_id:
+        account = stripe.Account.create(
+            type="express",
+            country="DE", # বা আপনার ডিফল্ট কান্ট্রি
+            email=company.user.email,
+            capabilities={
+                "card_payments": {"requested": True},
+                "transfers": {"requested": True},
+            },
+            business_type="individual",
+            metadata={"company_id": str(company.id)}
+        )
+        company.stripe_connect_id = account.id
+        company.save()
+
+    # 2. Create the Account Link (Onboarding URL)
+    # এই লিঙ্কটি ৩-৫ মিনিট পর এক্সপায়ার হয়ে যায়, তাই এটি প্রতিবার নতুন জেনারেট করতে হয়
+    account_link = stripe.AccountLink.create(
+        account=company.stripe_connect_id,
+        refresh_url="https://ape-in-eft.ngrok-free.app/api/finance/connect/refresh/", # ফেইল করলে বা এক্সপায়ার হলে এখানে যাবে
+        return_url="https://ape-in-eft.ngrok-free.app/api/finance/connect/success/", # সাকসেস হলে এখানে যাবে
+        type="account_onboarding",
+    )
+
+    return account_link.url
 
 def process_auto_renewal(company_id):
     """
@@ -222,7 +270,7 @@ def process_auto_renewal(company_id):
         amount = float(plan.price)
         
         # 1. Initialize Stripe
-        stripe_client, api_key, _ = get_stripe_client(use_env=True)
+        stripe_client, api_key, _ = get_stripe_client()
         stripe_client.api_key = api_key
 
         # 2. Create Payment record
@@ -234,33 +282,44 @@ def process_auto_renewal(company_id):
             status="pending",
         )
 
-        # 3. Attempt Payment Intent (Off-Session)
+        # 3. Create Invoice Item (This represents the line item on the invoice)
         try:
-            intent = stripe_client.PaymentIntent.create(
+            stripe_client.InvoiceItem.create(
+                customer=company.stripe_customer_id,
                 amount=int(amount * 100),
                 currency="eur",
-                customer=company.stripe_customer_id,
-                payment_method=company.stripe_payment_method_id,
-                off_session=True,
-                confirm=True,
+                description=f"Auto-renewal for {plan.get_name_display()}",
                 metadata={
                     "payment_id": str(payment.id),
                     "company_id": str(company.id),
-                    "plan_id": str(plan.id),
+                }
+            )
+
+            # 4. Create the Invoice
+            invoice = stripe_client.Invoice.create(
+                customer=company.stripe_customer_id,
+                default_payment_method=company.stripe_payment_method_id,
+                auto_advance=True, # Automatically attempt to pay
+                metadata={
+                    "payment_id": str(payment.id),
                     "type": "auto_renewal"
                 }
             )
 
-            if intent.status == 'succeeded':
+            # 5. Pay the Invoice
+            finalized_invoice = stripe_client.Invoice.pay(invoice.id)
+
+            if finalized_invoice.status == 'paid':
                 payment.status = "success"
-                payment.transaction_id = intent.id
+                payment.transaction_id = finalized_invoice.payment_intent
+                payment.invoice_url = finalized_invoice.hosted_invoice_url # PDF/Hosted link
                 payment.save()
 
-                # 4. Deactivate old subscription
+                # 6. Deactivate old subscription
                 subscription.active = False
                 subscription.save()
 
-                # 5. Create new subscription
+                # 7. Create new subscription
                 new_sub = Subscriptions.objects.create(
                     company=company,
                     plan=plan,
@@ -269,17 +328,21 @@ def process_auto_renewal(company_id):
                     start=timezone.now()
                 )
                 
-                print(f"✅ Successfully auto-renewed subscription for {company.user.email}")
+                print(f"✅ Successfully auto-renewed with Invoice for {company.user.email}")
                 return new_sub, "Renewal successful"
             else:
                 payment.status = "failed"
                 payment.save()
-                return None, f"Payment failed with status: {intent.status}"
+                return None, f"Invoice payment failed with status: {finalized_invoice.status}"
 
         except stripe.error.CardError as e:
             payment.status = "failed"
             payment.save()
             return None, f"Card error: {str(e)}"
+        except Exception as e:
+            payment.status = "failed"
+            payment.save()
+            return None, f"Stripe Error: {str(e)}"
             
     except Exception as e:
         print(f"❌ Error during auto-renewal: {e}")

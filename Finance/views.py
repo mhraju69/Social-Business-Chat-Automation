@@ -21,40 +21,6 @@ import logging
 logger = logging.getLogger(__name__)
 # Create your views here.
 
-class StripeListCreateView(generics.ListCreateAPIView):
-    permission_classes = [permissions.IsAuthenticated]
-    serializer_class = StripeSerializer
-
-    def get_queryset(self):
-        user = self.request.user
-        company = getattr(user, 'company', None)
-        if hasattr(company, 'first'):
-            company = company.first()  # get actual Company instance
-        return StripeCredential.objects.filter(company=company)
-
-class StripeUpdateView(generics.UpdateAPIView):
-    permission_classes = [permissions.IsAuthenticated]
-    serializer_class = StripeSerializer
-
-    def get_object(self):
-        user = self.request.user
-        company_qs = getattr(user, 'company', None)
-
-        if hasattr(company_qs, 'first'):
-            company = company_qs.first()
-        else:
-            company = company_qs
-
-        if not company:
-            raise serializers.ValidationError("User has no associated company.")
-
-        try:
-            stripe_obj = company.stripe  # OneToOneField reverse
-        except ObjectDoesNotExist:
-            raise serializers.ValidationError("Stripe object does not exist for this company.")
-
-        return stripe_obj
-
 class GetPlans(APIView):
     permission_classes = [AllowAny]
     serializer_class = PlanSerializers
@@ -86,8 +52,6 @@ def create_checkout_session_for_service(request):
 
     except ValueError as e:
         return Response({"error": str(e)}, status=400)
-    except StripeCredential.DoesNotExist:
-        return Response({"error": "Stripe credentials not found"}, status=404)
 
 @csrf_exempt
 @api_view(["POST"])
@@ -109,9 +73,34 @@ def create_checkout_session_for_subscription(request):
 
     except ValueError as e:
         return Response({"error": str(e)}, status=400)
-    except StripeCredential.DoesNotExist:
-        return Response({"error": "Stripe credentials not found"}, status=404)
 
+
+@csrf_exempt
+@api_view(["POST"])
+@permission_classes([IsAuthenticated])
+def start_stripe_connect(request):
+    """API to start Stripe Connect onboarding."""
+    company = getattr(request.user, 'company', None)
+    if not company:
+        return Response({"error": "Company not found for this user"}, status=404)
+        
+    try:
+        onboarding_url = create_stripe_connect_account(company.id)
+        return Response({"onboarding_url": onboarding_url}, status=200)
+    except Exception as e:
+        return Response({"error": str(e)}, status=400)
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def stripe_connect_success(request):
+    """Handle successful onboarding redirect."""
+    return Response({"message": "Successfully connected Stripe account. You can now receive payments."}, status=200)
+
+@api_view(["GET"])
+@permission_classes([AllowAny])
+def stripe_connect_refresh(request):
+    """Handle onboarding session refresh/retry."""
+    return Response({"message": "The onboarding session expired. Please try again from your dashboard."}, status=400)
 
 @csrf_exempt
 def stripe_webhook(request):
@@ -120,24 +109,14 @@ def stripe_webhook(request):
 
     logger.info(f"Received webhook event with signature: {sig_header[:20]}...")
 
-    # Collect all webhook secrets
-    webhook_secrets = [settings.STRIPE_WEBHOOK_SECRET]
-    webhook_secrets += list(
-        StripeCredential.objects.values_list('webhook_secret', flat=True)
-    )
+    # Use platform secret for verification
+    webhook_secret = settings.STRIPE_WEBHOOK_SECRET
 
-    event = None
-    for secret in webhook_secrets:
-        try:
-            event = stripe.Webhook.construct_event(payload, sig_header, secret)
-            logger.info(f"✅ Webhook verified with secret: {secret[:10]}...")
-            break
-        except Exception as e:
-            logger.warning(f"Failed to verify with secret {secret[:10]}...: {str(e)}")
-            continue
-
-    if not event:
-        logger.error("❌ Invalid Stripe signature for all known secrets.")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
+        logger.info(f"✅ Webhook verified with secret: {webhook_secret[:10]}...")
+    except Exception as e:
+        logger.error(f"❌ Webhook verification failed: {str(e)}")
         return HttpResponse(status=400)
 
     logger.info(f"✅ Verified event: {event['type']}")
@@ -176,14 +155,8 @@ def stripe_webhook(request):
     # ✔ SUCCESSFUL PAYMENT
     # ----------------------------------------------------------------------
     if event['type'] == 'checkout.session.completed':
-        # Set API key for retrieval - use system key as default
+        # Use platform API key
         stripe.api_key = settings.STRIPE_SECRET_KEY
-        if payment.type == "services":
-            try:
-                cred = StripeCredential.objects.get(company=company)
-                stripe.api_key = cred.api_key
-            except StripeCredential.DoesNotExist:
-                pass
 
         try:
             with transaction.atomic():
@@ -192,6 +165,17 @@ def stripe_webhook(request):
                 payment.payment_date = timezone.now()
                 # Store PaymentIntent ID as transaction_id if available
                 payment.transaction_id = data.get('payment_intent') or data.get('id')
+                
+                # Capture Invoice URL if generated (available in mode="payment" with invoice_creation enabled)
+                invoice_id = data.get('invoice')
+                if invoice_id:
+                    try:
+                        inv = stripe.Invoice.retrieve(invoice_id)
+                        payment.invoice_url = inv.hosted_invoice_url
+                        logger.info(f"📄 Saved Invoice URL for Payment {payment.id}")
+                    except Exception as e:
+                        logger.error(f"Error retrieving invoice {invoice_id}: {e}")
+
                 payment.save()
                 
                 logger.info(f"✅ Payment {payment.id} status updated to SUCCESS")
