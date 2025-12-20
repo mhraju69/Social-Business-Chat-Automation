@@ -1,4 +1,5 @@
 from rest_framework.response import Response
+from asgiref.sync import sync_to_async
 from rest_framework import status,permissions,generics
 from rest_framework.views import APIView 
 from rest_framework.viewsets import ModelViewSet 
@@ -18,6 +19,7 @@ from Accounts.permissions import *
 from .helper import *
 import urllib.parse
 from django.shortcuts import render
+from Ai.tasks import sync_company_knowledge_task
 
 class ClientBookingView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -1007,6 +1009,10 @@ class AITrainingFileBulkUploadView(APIView):
             created_files.append(ai_file)
             
         serializer = AITrainingFileSerializer(created_files, many=True)
+        
+        # Trigger knowledge sync after upload in background
+        sync_company_knowledge_task.delay(company.id)
+        
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     
     def get(self, request):

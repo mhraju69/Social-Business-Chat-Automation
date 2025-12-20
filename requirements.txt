@@ -109,3 +109,4 @@ pytz
 qdrant-client
 langchain_openai
 django-redis
+pandas

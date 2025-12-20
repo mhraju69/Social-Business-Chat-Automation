@@ -161,10 +161,7 @@ def ensure_collection_exists(client: QdrantClient, vector_size: int = 1536):
         pass
 
 def process_company_knowledge(company_id: int):
-    """
-    Main function to sync company data to Qdrant.
-    It identifies changes and updates the vector DB accordingly.
-    """
+    print("Processing company knowledge for company_id: ", company_id)
     logger.info(f"Starting knowledge sync for Company ID: {company_id}")
     
     client = get_qdrant_client()
