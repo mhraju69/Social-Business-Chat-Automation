@@ -29,18 +29,18 @@ class  AdminCompanySerializer(serializers.ModelSerializer):
     def get_invoice(self, obj):
         # TODO change it later to get actual invoice data
         payment = Payment.objects.filter(company=obj).first()
-        payment_url = payment.payment_url if payment else None
-        if payment_url:
+        invoice_url = payment.invoice_url if payment else None
+        if invoice_url:
             return (
                 {
                     'name': 'Sample Invoice',
-                    'url': payment_url,
+                    'url': invoice_url,
                 }
             )
         return (
                 {
                     'name': 'Sample Invoice',
-                    'url': payment_url,
+                    'url': invoice_url,
                 }
             )
 class AdminTeamMemberSerializer(serializers.ModelSerializer):
@@ -58,7 +58,10 @@ class AdminTeamMemberSerializer(serializers.ModelSerializer):
         activity = AdminActivity.objects.get_or_create(user=obj)[0]
         return activity.invoices_download
 
-class ChannelOverviewSerializer(serializers.Serializer):
+class ChannelOverviewSerializer(serializers.ModelSerializer):
+    # id = serializers.IntegerField()
+    # name = serializers.CharField()
+    status_message = serializers.SerializerMethodField()
     whatsapp = serializers.SerializerMethodField()
     facebook = serializers.SerializerMethodField()
     instagram = serializers.SerializerMethodField()
@@ -101,6 +104,9 @@ class ChannelOverviewSerializer(serializers.Serializer):
                 'messages_today':0
             }
         return None
+    
+    def get_status_message(self, obj):
+        return "HI baby"
 
 
     
