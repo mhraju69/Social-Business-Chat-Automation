@@ -1,8 +1,7 @@
 from rest_framework import serializers
 from Accounts.models import User, Company
-from admin_dashboard import models
-import json
-
+from Finance.models import Payment
+from admin_dashboard.models import AdminActivity
 
 class SimpleUserSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source='company.name', read_only=True)
@@ -29,9 +28,79 @@ class  AdminCompanySerializer(serializers.ModelSerializer):
     
     def get_invoice(self, obj):
         # TODO change it later to get actual invoice data
+        payment = Payment.objects.filter(company=obj).first()
+        payment_url = payment.payment_url if payment else None
+        if payment_url:
+            return (
+                {
+                    'name': 'Sample Invoice',
+                    'url': payment_url,
+                }
+            )
         return (
-            {
-                'name': 'Sample Invoice',
-                'url': 'https://example.com/invoice/0',
+                {
+                    'name': 'Sample Invoice',
+                    'url': payment_url,
+                }
+            )
+class AdminTeamMemberSerializer(serializers.ModelSerializer):
+    new_user_added = serializers.SerializerMethodField()
+    invoices_download = serializers.SerializerMethodField()
+    class Meta:
+        model = User
+        fields = ['id', 'name', 'image', 'role', 'email', 'is_active', 'last_login', 'new_user_added', 'invoices_download']
+    
+    def get_new_user_added(self, obj): 
+        activity = AdminActivity.objects.get_or_create(user=obj)[0]
+        return activity.new_user_added
+
+    def get_invoices_download(self, obj):
+        activity = AdminActivity.objects.get_or_create(user=obj)[0]
+        return activity.invoices_download
+
+class ChannelOverviewSerializer(serializers.Serializer):
+    whatsapp = serializers.SerializerMethodField()
+    facebook = serializers.SerializerMethodField()
+    instagram = serializers.SerializerMethodField()
+    class Meta:
+        model = Company
+        fields = ['id', 'name', 'status_message', 'whatsapp', 'facebook', 'instagram']
+
+    def get_whatsapp(self, obj):
+        whatsapp_channel = obj.user.chat_profiles.filter(platform='whatsapp').first()
+        if whatsapp_channel:
+            last_used = None
+            return {
+                'id': whatsapp_channel.id,
+                'status': "sample status",
+                'last_used': last_used,
+                'messages_today':0
             }
-        )
+        return None
+    
+    def get_facebook(self, obj):
+        facebook_channel = obj.user.chat_profiles.filter(platform='facebook').first()
+        if facebook_channel:
+            last_used = None
+            return {
+                'id': facebook_channel.id,
+                'status': "sample status",
+                'last_used': last_used,
+                'messages_today':0
+            }
+        return None
+    
+    def get_instagram(self, obj):
+        instagram_channel = obj.user.chat_profiles.filter(platform='instagram').first()
+        if instagram_channel:
+            last_used = None
+            return {
+                'id': instagram_channel.id,
+                'status': "sample status",
+                'last_used': last_used,
+                'messages_today':0
+            }
+        return None
+
+
+    
