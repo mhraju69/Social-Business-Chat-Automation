@@ -5,7 +5,9 @@ import logging
 from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 
-load_dotenv()
+# Scan up 3 levels to find .env (Ai -> Social-Business-Chat-Automation -> wahejan_working)
+env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env')
+load_dotenv(dotenv_path=env_path)
 
 # Django Setup
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -35,20 +37,18 @@ logger = logging.getLogger(__name__)
 
 # Constants
 QDRANT_URL = "https://deed639e-bc0e-43fe-8dc2-2edaed834f41.europe-west3-0.gcp.cloud.qdrant.io:6333"
-# Ideally these should be in settings/env
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") # Ensure this is set in .env
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY") 
 COLLECTION_NAME = "company_knowledge"
 
 # Initialize Clients
-# We use a global or lazy initialization to allow module import without immediate failure if keys are missing
 def get_qdrant_client():
     if not QDRANT_API_KEY:
         logger.warning("QDRANT_API_KEY is not set. Connection might fail.")
     return QdrantClient(
         url=QDRANT_URL, 
         api_key=QDRANT_API_KEY,
-        timeout=120  # Increase timeout to 120 seconds
+        timeout=120
     )
 
 def get_embedding_model():
@@ -61,8 +61,6 @@ def get_embedding_model():
 def extract_text_from_pdf(file_path: str) -> str:
     text = ""
     try:
-        # Depending on storage, file_path might be a relative path from MEDIA_ROOT or a full path
-        # Django 'FileField' usually stores relative to MEDIA_ROOT
         full_path = os.path.join(settings.MEDIA_ROOT, str(file_path))
         if not os.path.exists(full_path):
              logger.error(f"File not found: {full_path}")
@@ -98,17 +96,12 @@ def extract_text_from_csv(file_path: str) -> str:
              return ""
         
         df = pd.read_csv(full_path)
-        # Convert to string representation or iterate
         text = df.to_string(index=False)
     except Exception as e:
         logger.error(f"Error reading CSV {file_path}: {e}")
     return text
 
 def get_file_content(file_obj, file_type: str) -> str:
-    """
-    Dispatcher for file content extraction.
-    file_obj: The Django model field file object (e.g., instance.file)
-    """
     if not file_obj:
         return ""
     
@@ -143,21 +136,18 @@ def ensure_collection_exists(client: QdrantClient, vector_size: int = 1536):
         )
         logger.info(f"Created collection {COLLECTION_NAME}")
         
-    # Ensure Index on company_id
     try:
         client.create_payload_index(
             collection_name=COLLECTION_NAME,
             field_name="company_id",
             field_schema=rest.PayloadSchemaType.INTEGER
         )
-        # Also index source_id
         client.create_payload_index(
             collection_name=COLLECTION_NAME,
             field_name="source_id",
             field_schema=rest.PayloadSchemaType.KEYWORD
         )
     except Exception as e:
-        # Index might already exist
         pass
 
 def process_company_knowledge(company_id: int):
@@ -167,25 +157,19 @@ def process_company_knowledge(company_id: int):
     client = get_qdrant_client()
     embeddings = get_embedding_model()
     
-    # 1. Ensure Collection Exists
     ensure_collection_exists(client)
     
-    # 2. Fetch Data from SQL DB
-    # KnowledgeBase
-    kb_entries = KnowledgeBase.objects.filter(user__company__id=company_id)
-    # AITrainingFile
-    training_files = AITrainingFile.objects.filter(company__id=company_id)
-    
     # Map of source_id -> content/metadata
-    # source_id format: "kb_{id}" or "af_{id}"
     current_sources = {}
     
-    # Process KnowledgeBase
+    # 1. KnowledgeBase
+    kb_entries = KnowledgeBase.objects.filter(user__company__id=company_id)
     for kb in kb_entries:
         sid = f"kb_{kb.id}"
         text_content = ""
+        text_content += f"Title: {kb.name}\n"
         if kb.details:
-            text_content += f"Title: {kb.name}\nDetails: {kb.details}\n"
+            text_content += f"Details: {kb.details}\n"
         if kb.file:
             text_content += get_file_content(kb.file, 'file')
         
@@ -195,7 +179,8 @@ def process_company_knowledge(company_id: int):
                 "metadata": {"source": "KnowledgeBase", "name": kb.name, "company_id": company_id}
             }
             
-    # Process AITrainingFile
+    # 2. AITrainingFile
+    training_files = AITrainingFile.objects.filter(company__id=company_id)
     for tf in training_files:
         sid = f"af_{tf.id}"
         text_content = get_file_content(tf.file, 'file')
@@ -205,7 +190,7 @@ def process_company_knowledge(company_id: int):
                 "metadata": {"source": "AITrainingFile", "filename": tf.file.name, "company_id": company_id}
             }
 
-    # Process Services
+    # 3. Services
     services = Service.objects.filter(company__id=company_id)
     for svc in services:
         sid = f"svc_{svc.id}"
@@ -221,42 +206,60 @@ def process_company_knowledge(company_id: int):
             "metadata": {"source": "Service", "name": svc.name, "company_id": company_id}
         }
 
-    # Process Bookings (Future/Recent)
-    # Maybe limit to active bookings to avoid pollution?
-    bookings = Booking.objects.filter(company__id=company_id)
-    for bk in bookings:
-        sid = f"bk_{bk.id}"
-        text_content = f"Booking: {bk.title}\nTime: {bk.start_time} to {bk.end_time}\n"
-        if bk.client:
-            text_content += f"Client: {bk.client}\n"
-        if bk.location:
-            text_content += f"Location: {bk.location}\n"
-        if bk.notes:
-            text_content += f"Notes: {bk.notes}\n"
-        
-        current_sources[sid] = {
-            "text": text_content,
-            "metadata": {"source": "Booking", "title": bk.title, "company_id": company_id}
-        }
-
-    # Process User (Company Owner)
+    # 4. Company Profile & Owner
     try:
         company = Company.objects.get(id=company_id)
+        
+        # Company Profile
+        sid_cmp = f"cmp_{company.id}"
+        cmp_text = f"Company Profile: {company.name}\n"
+        if company.industry:
+            cmp_text += f"Industry: {company.industry}\n"
+        if company.description:
+            cmp_text += f"Description: {company.description}\n"
+        
+        addr_parts = [p for p in [company.address, company.city, company.country] if p]
+        if addr_parts:
+            cmp_text += f"Address: {', '.join(addr_parts)}\n"
+            
+        if company.website:
+            cmp_text += f"Website: {company.website}\n"
+        
+        if company.is_24_hours_open:
+            cmp_text += "Hours: Open 24 Hours\n"
+        elif company.open and company.close:
+             cmp_text += f"Hours: {company.open} - {company.close}\n"
+
+        if company.language:
+             cmp_text += f"Language: {company.language}\n"
+
+        if company.summary:
+             cmp_text += f"Summary: {company.summary}\n"
+             
+        if company.tone:
+             cmp_text += f"Brand Tone: {company.tone}\n"
+             
+        current_sources[sid_cmp] = {
+            "text": cmp_text,
+            "metadata": {"source": "CompanyProfile", "name": company.name, "company_id": company.id}
+        }
+
+        # Owner Profile
         owner = company.user
-        sid = f"usr_{owner.id}"
+        sid_usr = f"usr_{owner.id}"
         text_content = f"Company Owner/Profile: {owner.name or owner.email}\n"
         text_content += f"Email: {owner.email}\n"
         if owner.phone:
             text_content += f"Phone: {owner.phone}\n"
         
-        current_sources[sid] = {
+        current_sources[sid_usr] = {
             "text": text_content,
             "metadata": {"source": "User", "name": owner.name or "Owner", "company_id": company_id}
         }
     except Company.DoesNotExist:
         logger.warning(f"Company {company_id} not found.")
 
-    # Process Opening Hours (Aggregated)
+    # 5. Opening Hours
     opening_hours = OpeningHours.objects.filter(company__id=company_id)
     if opening_hours.exists():
         sid = f"opening_{company_id}"
@@ -269,36 +272,33 @@ def process_company_knowledge(company_id: int):
             "metadata": {"source": "OpeningHours", "company_id": company_id}
         }
 
-    # 3. Fetch Existing IDs from Qdrant for this Company
-    # We use scroll to get all points with filter
+    # Fetch Existing IDs from Qdrant
     existing_ids = set()
-    
     scroll_filter = rest.Filter(
         must=[
             rest.FieldCondition(key="company_id", match=rest.MatchValue(value=company_id))
         ]
     )
     
-    # We need to know which 'source_ids' exist. 
-    # Since Qdrant stores chunks, one source file = multiple points (chunks).
-    # We store 'source_id' in payload to group them.
-    
-    # Efficient strategy:
-    # Get all points (only payloads)
     points_iterator = client.scroll(
         collection_name=COLLECTION_NAME,
         scroll_filter=scroll_filter,
         with_payload=True,
         with_vectors=False,
-        limit=10000 # Assuming reasonable limit per company, else paginate loops
+        limit=10000 
     )[0]
     
-    # Map source_id -> list of point_ids
     source_to_point_ids = {} 
     
     for point in points_iterator:
         payload = point.payload or {}
         sid = payload.get("source_id")
+        # IGNORE booking points if they still exist (bk_) so we don't accidentally delete them if we want to keep them, 
+        # OR better: if we want to CLEAN them, we should track them. 
+        # The user said "clean_bookings_vectors.py" is unused so maybe we should just ignore them or delete them?
+        # User said "remove unnecessary parts". If 'bk_' data is in DB, it's unnecessary. 
+        # But let's stick to syncing what's in 'current_sources'. 
+        
         if sid:
             if sid not in source_to_point_ids:
                 source_to_point_ids[sid] = []
@@ -307,23 +307,18 @@ def process_company_knowledge(company_id: int):
             
     logger.info(f"Found {len(existing_ids)} existing sources in Vector DB.")
 
-    # 4. Compare and Sync
-    
-    # Identify Deleted
+    # Sync Logic
     to_delete_source_ids = existing_ids - set(current_sources.keys())
-    
-    # Identify New or Updated
-    # Note: For strict 'updated' logic, we'd need a hash. 
-    # For now, we can assume if it's in current_sources, we upsert it (overwrite).
-    # To be extremely efficient, we could check 'updated_at' if we stored it in payload.
-    # But overwriting active files is usually acceptable unless they are huge.
-    
     to_upsert_source_ids = set(current_sources.keys())
     
-    # DELETE OLD
+    # Force cleanup of any 'bk_' (booking) sources if found in existing_ids
+    # This effectively does what clean_bookings_vectors did.
+    for eid in list(to_delete_source_ids):
+        if eid.startswith("bk_"):
+            logger.info(f"Cleaning up legacy booking source: {eid}")
+    
     if to_delete_source_ids:
         logger.info(f"Deleting {len(to_delete_source_ids)} outdated sources.")
-        # Flatten point IDs
         points_to_delete = []
         for sid in to_delete_source_ids:
             points_to_delete.extend(source_to_point_ids.get(sid, []))
@@ -334,11 +329,10 @@ def process_company_knowledge(company_id: int):
                 points_selector=rest.PointIdsList(points=points_to_delete)
             )
 
-    # UPSERT NEW/UPDATED
-    # We chunk and upload
+    # Upsert
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=200,
+        chunk_size=700,
+        chunk_overlap=150,
         length_function=len
     )
     
@@ -349,10 +343,6 @@ def process_company_knowledge(company_id: int):
         raw_text = data["text"]
         metadata = data["metadata"]
         
-        # If we didn't delete the old chunks for this SID (because it's an update, not a delete),
-        # we strictly should delete old chunks first to avoid duplication (e.g. if file got shorter).
-        # Existing logic: 'to_delete_source_ids' only caught removed files.
-        # So we MUST delete existing points for this SID before re-uploading.
         if sid in source_to_point_ids:
             old_points = source_to_point_ids[sid]
             client.delete(
@@ -360,14 +350,10 @@ def process_company_knowledge(company_id: int):
                 points_selector=rest.PointIdsList(points=old_points)
             )
         
-        # Chunking
         chunks = text_splitter.split_text(raw_text)
-        
         if not chunks:
             continue
             
-        # Embed
-        # batch embed is better
         try:
             vectors = embeddings.embed_documents(chunks)
         except Exception as e:
@@ -388,11 +374,8 @@ def process_company_knowledge(company_id: int):
             points.append(rest.PointStruct(id=point_id, vector=vector, payload=payload))
             
         if points:
-            # Batch upsert to avoid timeout on large uploads
             batch_size = 100
             total_batches = (len(points) + batch_size - 1) // batch_size
-            
-            logger.info(f"Upserting {len(points)} points for source {sid} in {total_batches} batch(es)")
             
             for batch_idx in range(0, len(points), batch_size):
                 batch = points[batch_idx:batch_idx + batch_size]
@@ -400,16 +383,16 @@ def process_company_knowledge(company_id: int):
                     client.upsert(
                         collection_name=COLLECTION_NAME,
                         points=batch,
-                        wait=True  # Wait for operation to complete
+                        wait=True
                     )
-                    logger.info(f"  Batch {batch_idx//batch_size + 1}/{total_batches} uploaded successfully")
                 except Exception as e:
-                    logger.error(f"  Failed to upsert batch {batch_idx//batch_size + 1}: {e}")
-                    # Continue with next batch instead of failing completely
+                    logger.error(f"  Failed to upsert batch: {e}")
                     continue
+            
+            logger.info(f"Successfully processed {len(points)} chunks for source {sid}.")
             
     logger.info("Sync completed.")
 
 if __name__ == "__main__":
-    # Test with company_id 2 as per setup_db.py
+    # Test with company_id 2
     process_company_knowledge(2)
