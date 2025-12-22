@@ -155,11 +155,12 @@ def wait_and_reply(room_id, delay):
     # Get company from room -> profile -> user -> company
     company = room.profile.user.company
     
-    reply_text = get_ai_response(
+    reply_data = get_ai_response(
         company_id=company.id, 
         query=full_text, 
         history=get_msg_history(room_id=room.id)
     )
+    reply_text = reply_data['content']
     print(f"✅ [{room.profile.platform}] AI response generated: {reply_text[:100]}...")
 
     # Send reply via existing send_message function

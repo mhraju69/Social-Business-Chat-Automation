@@ -9,12 +9,11 @@ from rest_framework_simplejwt.tokens import RefreshToken
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True)
     company = serializers.SerializerMethodField()
-    status = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ['id', 'name', 'email', 'password', 'image', 'phone', 'role', 'dob', 'is_active', 'is_staff', 'is_superuser', 'block', 'date_joined', 'company', 'status']
-        read_only_fields = ['is_active', 'is_staff', 'is_superuser', 'date_joined','id','role', 'company', 'status']
+        fields = ['id', 'name', 'email', 'password', 'image', 'phone', 'role', 'dob', 'is_active', 'block', 'date_joined', 'company']
+        read_only_fields = ['is_active', 'is_staff', 'is_superuser', 'date_joined','id','role', 'company']
 
     def create(self, validated_data):
         password = validated_data.pop('password', None)
@@ -103,9 +102,7 @@ class LoginSerializer(serializers.Serializer):
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
         model = Company
-        exclude = ["refresh_token"]
-        
-        read_only_fields = ['user']
+        exclude = ["refresh_token","user","created_at","updated_at","stripe_customer_id","stripe_payment_method_id","stripe_connect_id"]
 
 class ServiceSerializer(serializers.ModelSerializer):
     class Meta:

@@ -24,4 +24,5 @@ urlpatterns = [
     path('logout-session/<int:session_id>/', LogoutSessionView.as_view()),
     path('logout-all-sessions/', LogoutAllSessionsView.as_view()),
     path('sessions/', ActiveSessionsView.as_view()),
+    path('me/', UserDataView.as_view()),
 ]

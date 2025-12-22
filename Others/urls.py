@@ -27,4 +27,5 @@ urlpatterns = [
     path('bookings/days/', BookingDaysView.as_view(), name='booking-days'),
     path('ai-training-files/', AITrainingFileBulkUploadView.as_view(), name='ai-training-files'),
     path('validate-token/', ValidateTokenView.as_view(), name='validate-token'),
+    path('knowledge-category/', KnowledgeCategoryView.as_view()),
 ]
