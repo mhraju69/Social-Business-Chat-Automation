@@ -385,7 +385,7 @@ class TestChatConsumer(AsyncWebsocketConsumer):
 
             await self.send(text_data=json.dumps({
                 "sender": "ai",
-                "message": response
+                "message": response.get('content', "Sorry, I couldn't generate a response.")
             }))
 
         except Exception as e:

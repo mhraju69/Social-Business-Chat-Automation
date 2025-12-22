@@ -9,6 +9,7 @@ import pytz
 import re
 from typing import List, Dict, Optional
 
+
 load_dotenv()
 
 # Django Setup (if run standalone)
@@ -113,7 +114,7 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
         logger.error(f"Error calculating slots: {e}")
         return []
 
-def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] = None, tone: str = "professional") -> SimpleNamespace:
+def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] = None, tone: str = "professional") -> dict:
     """
     Generates an AI response for a specific company using RAG.
     
@@ -127,9 +128,9 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     
     # 1. Initialize Clients
     if not QDRANT_API_KEY:
-        return "System Error: Qdrant API Key missing."
+        return {"content": "System Error: Qdrant API Key missing.", "token_usage": {}}
     if not OPENAI_API_KEY:
-        return "System Error: OpenAI API Key missing."
+        return {"content": "System Error: OpenAI API Key missing.", "token_usage": {}}
         
     client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=OPENAI_API_KEY)
@@ -140,7 +141,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         query_vector = embeddings.embed_query(query)
     except Exception as e:
         logger.error(f"Embedding failed: {e}")
-        return "I'm having trouble understanding that right now."
+        return {"content": "I'm having trouble understanding that right now.", "token_usage": {}}
         
     search_filter = rest.Filter(
         must=[
@@ -510,9 +511,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         "token_usage": token_usage
     }
 
-# Simple helper for return typing
-class SimpleNamespace:
-    pass
+
 
 if __name__ == "__main__":
     # Test

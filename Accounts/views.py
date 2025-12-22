@@ -398,3 +398,9 @@ class SocialAuthCallbackView(APIView):
 
         except Exception as e:
             return Response({'error': str(e)}, status=500)
+
+class UserDataView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get(self, request):
+        return Response(UserSerializer(request.user).data)

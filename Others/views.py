@@ -1176,3 +1176,16 @@ class ValidateTokenView(APIView):
         
         return Response(response_data, status=status.HTTP_200_OK)
 
+class KnowledgeCategoryView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    
+    def get(self, request):
+        company = Company.objects.filter(user=request.user).first()
+        if not company:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+        
+        return Response({
+            "opening_hours": OpeningHours.objects.filter(company=company).count(),
+            "knowledge_base": KnowledgeBase.objects.filter(user=request.user).count(),
+            "services": Service.objects.filter(company=company).count(),
+        })
