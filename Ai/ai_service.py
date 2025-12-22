@@ -3,10 +3,14 @@ import sys
 import django
 import logging
 from dotenv import load_dotenv
+import json
+from datetime import datetime, timedelta
+import pytz
+import re
+from typing import List, Dict, Optional
 
 load_dotenv()
 
-# Django Setup (if run standalone)
 # Django Setup (if run standalone)
 # Ensure project root is in path relative to this file
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -25,11 +29,19 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
-from typing import List, Dict, Optional
+
+from Others.models import OpeningHours, Booking
 from Accounts.models import Company
-import json
-from datetime import datetime, timedelta
-import pytz
+
+# Logging Configuration
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Constants
+QDRANT_URL = "https://deed639e-bc0e-43fe-8dc2-2edaed834f41.europe-west3-0.gcp.cloud.qdrant.io:6333"
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") 
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+COLLECTION_NAME = "company_knowledge"
 
 class MockRequest:
     """Mock Django Request object for reusing create_booking logic"""
@@ -42,7 +54,6 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
     Calculate available slots for a given date based on OpeningHours and existing Bookings.
     Returns a list of strings representing available start times.
     """
-    from Others.models import OpeningHours, Booking
     try:
         if not date_str:
             target_date = datetime.now()
@@ -63,9 +74,6 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
         end_time = datetime.combine(target_date, hours.end)
         
         # Get Bookings for this day
-        # Note: Booking times are stored in UTC usually, need to handle timezone carefully.
-        # For simplicity in this mock, we assume naive or inconsistent times are aligned.
-        # In production, use strict timezone handling.
         bookings = Booking.objects.filter(
             company_id=company_id, 
             start_time__date=target_date.date()
@@ -76,7 +84,11 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
             # We assume booking start/end are datetime objects
             # Convert to naive for comparison if needed
             b_start = b.start_time.replace(tzinfo=None) if b.start_time.tzinfo else b.start_time
-            b_end = b.end_time.replace(tzinfo=None) if b.end_time and b.end_time.tzinfo else (b.end_time or (b_start + timedelta(hours=1)))
+            if b.end_time:
+                 b_end = b.end_time.replace(tzinfo=None) if b.end_time.tzinfo else b.end_time
+            else:
+                 b_end = b_start + timedelta(hours=1)
+            
             booked_ranges.append((b_start, b_end))
             
         # Generate Slots (Hourly)
@@ -86,7 +98,7 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
             slot_end = current + timedelta(hours=1)
             is_taken = False
             for b_start, b_end in booked_ranges:
-                # Check overlap: (StartA <= EndB) and (EndA >= StartB)
+                # Check overlap: (StartA < EndB) and (EndA > StartB)
                 if current < b_end and slot_end > b_start:
                     is_taken = True
                     break
@@ -100,21 +112,8 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
     except Exception as e:
         logger.error(f"Error calculating slots: {e}")
         return []
-# Re-use config from ingestion or define here 
-# (Ideally, shared config file is better, but keeping in 'Ai/' as requested)
-QDRANT_URL = "https://deed639e-bc0e-43fe-8dc2-2edaed834f41.europe-west3-0.gcp.cloud.qdrant.io:6333"
-QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-COLLECTION_NAME = "company_knowledge"
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-from typing import List, Dict, Optional
-
-# ... imports ...
-
-def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] = None, tone: str = "professional") -> str:
+def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] = None, tone: str = "professional") -> SimpleNamespace:
     """
     Generates an AI response for a specific company using RAG.
     
@@ -149,19 +148,101 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         ]
     )
     
+    # 3. Retrieve Mandatory Context (Company Profile)
+    # We always want the company profile to be present so the AI knows who it is.
+    forced_context = ""
+    try:
+        profile_filter = rest.Filter(
+            must=[
+                rest.FieldCondition(key="company_id", match=rest.MatchValue(value=company_id)),
+                rest.FieldCondition(key="source_id", match=rest.MatchValue(value=f"cmp_{company_id}"))
+            ]
+        )
+        profile_results = client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=profile_filter,
+            limit=1,
+            with_payload=True,
+            with_vectors=False
+        )[0]
+        
+        if profile_results:
+            forced_context = profile_results[0].payload.get('text', '') + "\n\n"
+            logging.info("Attached Company Profile to context.")
+    except Exception as e:
+        logger.error(f"Failed to fetch profile: {e}")
+
     results = client.query_points(
         collection_name=COLLECTION_NAME,
         query=query_vector,
         query_filter=search_filter,
-        limit=5
+        limit=5, # Reduced from 10 for token optimization
+        score_threshold=0.2 
     ).points
 
-    company = Company.objects.get(id=company_id)
+    # Filter out Booking vectors (Ghost data) ONLY
+    # DO NOT filter out 'af_' (Training Files) as they are now legitimate sources.
+    retrieved_items = []
+    for res in results:
+        payload = res.payload or {}
+        sid = payload.get("source_id", "")
+        # Only exclude bookings from vector results (should be empty anyway if cleaned)
+        if sid.startswith("bk_"):
+            continue
+        retrieved_items.append(payload.get('text', ''))
     
-    logging.info(f"Found {len(results)} relevant chunks.")
+    retrieved_text = "\n\n".join(retrieved_items)
+    context_text = forced_context + retrieved_text
     
-    # 3. Construct Context
-    context_text = "\n\n".join([res.payload.get('text', '') for res in results])
+    try:
+        company = Company.objects.get(id=company_id)
+        company_name = company.name or "Unknown"
+    except:
+        company = None
+        company_name = "Unknown"
+
+    # --- Realtime Booking Data (SQLite) ---
+    # Fetch recent/future bookings to strictly provide availability info without leaking details.
+    if company:
+        try:
+            # Check if query implies booking/availability
+            booking_keywords = ['book', 'schedule', 'appointment', 'available', 'occupied', 'time', 'slot', 'day', 'week']
+            if any(w in query.lower() for w in booking_keywords):
+                from django.utils import timezone
+                now = timezone.now()
+                # Fetch bookings for next 7 days
+                end_date = now + timedelta(days=7)
+                
+                realtime_bookings = Booking.objects.filter(
+                    company=company,
+                    start_time__gte=now,
+                    start_time__lte=end_date
+                ).order_by('start_time')
+                
+                if realtime_bookings.exists():
+                    schedule_text = "\n\n--- REALTIME AVAILABILITY DATA ---\n"
+                    schedule_text += "Use this to answer availability questions. DO NOT reveal client names.\n"
+                    
+                    # Group by day
+                    grouped = {}
+                    for bk in realtime_bookings:
+                        # Convert to company timezone if possible, but standard is often UTC or server time.
+                        # Assuming usage of naive or standardized time here for simplicity.
+                        day = bk.start_time.strftime('%Y-%m-%d (%A)')
+                        if day not in grouped:
+                            grouped[day] = []
+                        # Just show time as 'Occupied'
+                        grouped[day].append(f"{bk.start_time.strftime('%H:%M')} - {bk.end_time.strftime('%H:%M')}: Occupied")
+                    
+                    for day, slots in grouped.items():
+                        schedule_text += f"{day}:\n" + "\n".join(f"  - {s}" for s in slots) + "\n"
+                    
+                    context_text += schedule_text
+                    logging.info(f"Attached {len(realtime_bookings)} realtime booking slots to context.")
+        except Exception as e:
+            logging.error(f"Error fetching realtime bookings: {e}")
+
+    # print(f"DEBUG: Retrieved Context:\n{context_text}\n-------------------")
     
     if not context_text:
         context_text = "No specific company documents found."
@@ -169,90 +250,150 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     # Format History
     history_text = ""
     if history:
-        for msg in history:
+        # Optimization: Limit to last 5 interaction turns to manage token usage
+        recent_history = history[-10:] 
+        for msg in recent_history:
             role = msg.get("role", "user").capitalize()
             content = msg.get("content", "")
             history_text += f"{role}: {content}\n"
     
     if not history_text:
         history_text = "No previous conversation."
-    company_name = company.name or "Unknown"
+    
     # 4. Generate Response
     # Using LangChain LCEL
     template = """
-    You are a professional CRM chatbot representing the company "{company_name}".
+    You are a professional customer support and sales representative for the company "{company_name}".
 
-    Your tone must be: {tone}.
-    You always communicate as a real human representative of "{company_name}".
-    
-    Core Identity Rules:
+    You always communicate as a real human working at "{company_name}".
+    You never mention or imply AI, automation, models, systems, bots, or internal processes.
+
+    Your tone must strictly follow: {tone}.
+
+    ────────────────────────────
+    CORE IDENTITY & BEHAVIOR
+    ────────────────────────────
     - Introduce yourself as a representative of "{company_name}" only in the first message of a new conversation.
-    - Do not repeat greetings or introductions in follow-up messages.
-    - Never mention AI, automation, language models, or technical systems.
-    - Speak naturally like a real support or sales executive.
+    - Do NOT repeat greetings or introductions in follow-up messages.
+    - Speak naturally, like a real support or sales executive.
     - Be polite, warm, confident, and professional.
-    - Sound conversational, not scripted.
-    - Keep responses clear and concise.
+    - Sound conversational and human — never robotic, scripted, or overly formal.
+    - Keep responses clear, helpful, and concise.
+    - Maintain continuity with the conversation history at all times.
 
-    Knowledge & Answering Rules:
-    - First, rely on the provided context to answer questions.
-    - If the context does not contain the answer, use only safe general knowledge.
-    - Never invent facts or specific details about "{company_name}".
-    - If information is unavailable, respond politely:
-    "At the moment, I don’t have the exact details on that. Let me check and get back to you shortly with the right information."
+    The client should always feel they are speaking with a real person from "{company_name}".
 
-    Customer Satisfaction Priority:
+    ────────────────────────────
+    KNOWLEDGE & TRUTHFULNESS
+    ────────────────────────────
+    - First, rely ONLY on the provided context to answer questions.
+    - The context may be incomplete, fragmented, or spread across multiple entries.
+    - You must understand the meaning of the context and respond in your own words.
+    - Do NOT copy or quote text verbatim from the context unless explicitly asked.
+    - Synthesize, summarize, and paraphrase naturally — as a human would explain.
+
+    If the context does NOT contain the answer:
+    - Do NOT guess.
+    - Do NOT use general knowledge.
+    - Do NOT invent facts or company details.
+
+    Use this exact fallback when information is unavailable:
+    “At the moment, I don’t have the exact details on that. Let me check and get back to you shortly with the right information.”
+
+    ────────────────────────────
+    USER INTENT & LANGUAGE UNDERSTANDING
+    ────────────────────────────
+    - Focus on what the user is trying to achieve, not just their exact wording.
+    - Understand synonyms, paraphrasing, informal language, and typos naturally.
+    - Treat semantically similar terms as the same (e.g., pricing = cost = plans).
+    - Infer reasonable intent when the meaning is clear.
+    - Ask clarifying questions ONLY if different interpretations would change the outcome.
+
+    ────────────────────────────
+    ANSWER CONSTRUCTION RULE
+    ────────────────────────────
+    When responding:
+    1. Understand the user’s intent.
+    2. Identify relevant information from the context.
+    3. Explain the answer clearly and naturally in your own words.
+    4. Never expose internal reasoning or mention the context source.
+
+    ────────────────────────────
+    CUSTOMER SATISFACTION PRIORITY
+    ────────────────────────────
     - Client satisfaction is the top priority.
-    - Acknowledge the client’s needs or concerns before providing solutions.
-    - Be helpful, calm, and solution-oriented.
+    - Acknowledge the client’s need, concern, or question before offering solutions.
+    - Be calm, reassuring, and solution-oriented.
+    - Avoid defensive, rushed, or dismissive language.
 
-    Sales & Conversion Behavior:
-    - Mention "{company_name}" services only when relevant.
-    - Offer booking or product guidance only if the client:
+    ────────────────────────────
+    SALES & CONVERSION BEHAVIOR
+    ────────────────────────────
+    - Mention "{company_name}" services ONLY when relevant.
+    - Offer bookings, plans, or product guidance ONLY if the client:
     • asks about services, pricing, plans, or availability
-    • shows clear interest or intent
-    - Keep offers helpful and never pushy.
-    
-    Booking & Availability Logic:
-    - If user shows interest -> Ask if they want to book an appointment.
-    - If user asks for availability/slots for a specific day or generally -> Output JSON: {{"action": "check_availability", "date": "YYYY-MM-DD" (or null)}}. **Do this even if they haven't picked a service yet.**
-    - If user wants to book -> Ask for "Service Name/Title", "Date & Time", and "Email" one by one.
-    - Once ALL details (Title, Time, Email) are collected, output JSON:
-      {{
+    • clearly shows interest or intent
+    - Never push or upsell.
+    - Keep recommendations helpful, subtle, and customer-focused.
+
+    ────────────────────────────
+    BOOKING & AVAILABILITY LOGIC
+    ────────────────────────────
+    - If the user shows interest in booking → ask if they would like to book an appointment.
+    - If the user asks about availability (specific day or general):
+
+    Output JSON ONLY:
+    {{
+        "action": "check_availability",
+        "date": "YYYY-MM-DD" or null
+    }}
+
+    - If the user wants to book:
+    Ask for the following ONE BY ONE:
+    1. Service name / title
+    2. Preferred date & time
+    3. Email address
+
+    - Once ALL THREE details are collected, output JSON ONLY:
+    {{
         "action": "create_booking",
         "booking_data": {{
-          "title": "...",
-          "start_time": "YYYY-MM-DD HH:MM:SS",
-          "client": "email@example.com"
+        "title": "...",
+        "start_time": "YYYY-MM-DD HH:MM:SS",
+        "client": "email@example.com"
         }}
-      }}
-    - IMPORTANT: Do NOT output JSON until you have all 3 fields. Ask clarifying questions first.
+    }}
 
+    IMPORTANT:
+    - Do NOT output booking JSON until all details are collected.
+    - Do NOT add any extra text before or after JSON responses.
 
-    Conversation Style:
-    - Maintain continuity with the conversation history.
-    - Avoid repeating greetings, phrases, or explanations.
-    - Ask natural follow-up questions only when helpful.
-    - Stay aligned with "{company_name}" brand voice.
+    TONE CONTROL & ADAPTATION
+    ────────────────────────
+    - The primary tone is defined by: {tone}.
+    - This base tone must ALWAYS be respected and never overridden.
 
-    Tone Control:
-    - Follow the specified tone strictly.
-    - Adapt tone slightly based on the client’s mood when appropriate.
+    - You may apply subtle, human-like adjustments based on the user’s mood or situation, without changing the base tone.
 
-    Final Rule:
-    - The client should always feel they are speaking with a real representative of "{company_name}".
+    Examples of allowed micro-adjustments:
+    - If the user sounds frustrated → be more patient, reassuring, and calm.
+    - If the user sounds curious → be slightly more explanatory and engaging.
+    - If the user sounds decisive → be more concise and action-focused.
 
+    These adjustments must:
+    - Stay fully aligned with the base tone.
+    - Never change the brand personality.
+    - Never contradict or replace the admin-defined tone.
+
+    If a conflict exists, the base tone always takes priority.
+
+    ────────────────────────────
+    FINAL RULE
+    ────────────────────────────
+    The user must never feel they are talking to a machine.
+    Every response should feel like it came from a real, attentive human representative of "{company_name}".
     
-    Context:
-    {context}
-    
-    Previous Conversation:
-    {history}
-    
-    Current Question: {question}
-    Current Date: {current_date}
-    
-    Answer:"""
+    """
     
     prompt = ChatPromptTemplate.from_template(template)
     # Remove StrOutputParser to get full AIMessage object with metadata
@@ -285,7 +426,6 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     # 5. Intent Handling (JSON Parsing)
     try:
         # Check for JSON block
-        import re
         json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
         if json_match:
             print(f"DEBUG: Found JSON: {json_match.group(0)}")
@@ -370,14 +510,16 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         "token_usage": token_usage
     }
 
+# Simple helper for return typing
+class SimpleNamespace:
+    pass
+
 if __name__ == "__main__":
     # Test
-    # Simulate a history
     test_history = [
         {"role": "user", "content": "Hi there"},
         {"role": "assistant", "content": "Hello! How can I help you today?"}
     ]
+    # NOTE: Set QDRANT_API_KEY and OPENAI_API_KEY env vars before running
     print("Testing Professional Tone:")
-    print(get_ai_response(2, "What is the training data about?", history=test_history, tone="professional"))
-    print("\nTesting Friendly Tone:")
-    print(get_ai_response(2, "What is the training data about?", history=test_history, tone="friendly"))
+    # print(get_ai_response(2, "What is the training data about?", history=test_history, tone="professional"))
