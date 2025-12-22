@@ -1024,6 +1024,18 @@ class AITrainingFileBulkUploadView(APIView):
         serializer = AITrainingFileSerializer(files, many=True)
         return Response(serializer.data)
 
+    def delete(self, request):
+        company = Company.objects.filter(user=request.user).first()
+        file = request.data.get('file_id')
+        if not company:
+            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
+            
+        files = AITrainingFile.objects.filter(company=company, id=file)
+        if not files:
+            return Response({"error": "File not found"}, status=status.HTTP_404_NOT_FOUND)
+        files.delete()
+        return Response({"detail": "File deleted successfully"}, status=status.HTTP_200_OK)
+
 class BookingDaysView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     

@@ -15,7 +15,7 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from Accounts.permissions import IsAdmin
 from drf_spectacular.utils import extend_schema_view, extend_schema, inline_serializer
 from rest_framework import serializers
-from .serializers import SimpleUserSerializer, AdminCompanySerializer
+from .serializers import AdminTeamMemberSerializer, ChannelOverviewSerializer, SimpleUserSerializer, AdminCompanySerializer
 from rest_framework.pagination import PageNumberPagination
 class DashboardView(generics.GenericAPIView):
     permission_classes = [IsAdmin]
@@ -421,5 +421,50 @@ class PerformanceAnalyticsAPIView(generics.GenericAPIView):
             },
             "total_revenue": total_revenue,
             "time_scope": time_scope,
+        }
+        return Response(data)
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Get list of admin and employee team members with search and ordering",
+    )
+)
+class AdminTeamMemberListView(generics.ListAPIView):
+    queryset = User.objects.filter(role__in=['admin'])
+    serializer_class = AdminTeamMemberSerializer
+    permission_classes = [IsAdmin]
+    pagination_class = UserListPagination
+
+    filter_backends = [SearchFilter, OrderingFilter]
+    search_fields = ['name', 'email', 'phone']
+    ordering_fields = ['date_joined', 'name', 'email']
+
+class CompanyOverviewPagination(PageNumberPagination):
+    page_size = 10
+    page_size_query_param = 'page_size'
+    max_page_size = 100
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Get channel overview for companies with search and ordering",
+    )
+)
+class CompanyOverviewListView(generics.GenericAPIView):
+    permission_classes = [IsAdmin]
+
+    def get(self, request, *args, **kwargs):
+        total_channels= ChatProfile.objects.count(),
+        online_channels = ChatProfile.objects.filter(bot_active=True).count(),
+        offline_channels = ChatProfile.objects.filter(bot_active=False).count(),
+        warning_channels = 0,  # Placeholder for warning channel calculation
+        companies = Company.objects.all()
+        serializer = ChannelOverviewSerializer(companies, many=True, context={'request': request})
+        data = {
+            "total_channels": total_channels,
+            "online_channels": online_channels,
+            "offline_channels": offline_channels,
+            "warning_channels": warning_channels,
+            "companies": serializer.data
         }
         return Response(data)
