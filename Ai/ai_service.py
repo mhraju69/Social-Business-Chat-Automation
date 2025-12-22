@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 import pytz
 import re
 from typing import List, Dict, Optional
+from types import SimpleNamespace
 
 load_dotenv()
 
@@ -392,7 +393,15 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     ────────────────────────────
     The user must never feel they are talking to a machine.
     Every response should feel like it came from a real, attentive human representative of "{company_name}".
-    
+
+    Context:
+    {context}
+
+    Conversation History:
+    {history}
+
+    User: {question}
+    Assistant:
     """
     
     prompt = ChatPromptTemplate.from_template(template)
@@ -425,11 +434,30 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
 
     # 5. Intent Handling (JSON Parsing)
     try:
-        # Check for JSON block
-        json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+        # Try to extract JSON from markdown code blocks first
+        json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', response_text, re.DOTALL)
         if json_match:
-            print(f"DEBUG: Found JSON: {json_match.group(0)}")
-            data = json.loads(json_match.group(0))
+            json_str = json_match.group(1)
+        else:
+            # Fallback to finding first { and last }
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            json_str = json_match.group(0) if json_match else ""
+
+        if json_str:
+            print(f"DEBUG: Found JSON String: {json_str}")
+            try:
+                data = json.loads(json_str)
+            except json.JSONDecodeError:
+                # Try correcting common LLM errors
+                import ast
+                try:
+                    # Valid python dictionary? (e.g. 'None' instead of 'null', single quotes)
+                    data = ast.literal_eval(json_str)
+                except:
+                    # Last ditch: simple cleanup
+                    cleaned = json_str.replace("'", '"').replace("None", "null").replace("True", "true").replace("False", "false")
+                    data = json.loads(cleaned)
+            
             action = data.get("action")
             print(f"DEBUG: Action: {action}")
             
@@ -503,6 +531,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
 
     except Exception as e:
         # Not JSON or parsing failed, just return text
+        print(f"DEBUG: JSON parsing failed: {e}")
         pass
 
     return {
