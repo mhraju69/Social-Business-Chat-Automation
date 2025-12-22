@@ -366,7 +366,7 @@ class CompanyListView(generics.ListAPIView):
     pagination_class = CompanyListPagination
 
     filter_backends = [SearchFilter, OrderingFilter]
-    search_fields = ['name', 'email']
+    search_fields = ['name']
     ordering_fields = ['created_at', 'name']
     
     def get_queryset(self):
