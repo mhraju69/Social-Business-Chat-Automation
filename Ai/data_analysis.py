@@ -156,7 +156,7 @@ def extract_semantic_data(text: str) -> Dict[str, Any]:
     """
 
     llm = ChatOpenAI(
-        model_name="gpt-4o",
+        model_name="gpt-4o-mini-2024-07-18",
         temperature=0.0, 
         openai_api_key=os.environ.get("OPENAI_API_KEY")
     )
@@ -283,14 +283,21 @@ def calculate_data_health(counts: Dict[str, int], details: Dict[str, Any]) -> Di
     score += (c_count * 2) 
     if c_count < 5:
         missing = details.get("missing_company_info", [])
-        if missing:
-             suggestions.append(f"Add missing Company Info: {', '.join(missing)}")
+        for m in missing:
+            # Map specific keys to nice labels if needed, or just capitalize
+            if m == "phone": suggestions.append("Phone")
+            elif m == "email": suggestions.append("Email")
+            elif m == "address": suggestions.append("Address")
+            elif m == "website": suggestions.append("Website")
+            elif m == "description": suggestions.append("Description")
+            elif m == "name": suggestions.append("Name")
+            else: suggestions.append(m.capitalize())
     
     # 2. Services (Max 30)
     if counts["services"] > 0:
         score += 30
     else:
-        suggestions.append("Add Services to your profile or documents.")
+        suggestions.append("Services")
         
     # 3. Prices (Max 20)
     if counts["services"] > 0:
@@ -298,27 +305,27 @@ def calculate_data_health(counts: Dict[str, int], details: Dict[str, Any]) -> Di
             score += 20
         elif counts["prices"] > 0:
             score += 10
-            suggestions.append("Some services are missing prices.")
+            suggestions.append("Pricing")
         else:
-            suggestions.append("Add prices for your services.")
+            suggestions.append("Pricing")
     
     # 4. Opening Hours (Max 10)
     if counts["openingHours"] > 0:
         score += 10
     else:
-        suggestions.append("Add Opening Hours.")
+        suggestions.append("Hours")
         
     # 5. Policies (Max 10)
     if counts["policies"] > 0:
         score += 10
     else:
-        suggestions.append("Add Policies (Cancellation, Privacy, etc).")
+        suggestions.append("Policies")
         
     # 6. FAQs (Max 20)
     if counts["faqs"] > 0:
         score += 20
     else:
-        suggestions.append("Add FAQs or a Knowledge Base.")
+        suggestions.append("FAQs")
 
     if score >= 90:
         reasoning = "Excellent data coverage. Your AI is ready to train."
@@ -332,7 +339,8 @@ def calculate_data_health(counts: Dict[str, int], details: Dict[str, Any]) -> Di
     return {
         "score": score,
         "reasoning": reasoning,
-        "enrichmentSuggestions": suggestions
+        "summary": f"Your AI knowledge is {score}% complete. Add missing information to improve customer interactions.",
+        "enrichmentSuggestions": sorted(list(set(suggestions)))
     }
 
 # --- Main Entry Point ---
