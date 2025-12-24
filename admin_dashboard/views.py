@@ -121,6 +121,16 @@ class UserListView(generics.ListAPIView):
     search_fields = ['name', 'email', 'phone']
     ordering_fields = ['date_joined', 'name', 'email']
 
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        is_active = self.request.query_params.get('is_active')
+        if is_active is not None:
+            if is_active.lower() == 'true':
+                queryset = queryset.filter(is_active=True)
+            elif is_active.lower() == 'false':
+                queryset = queryset.filter(is_active=False)
+        return queryset
+
 
 class EnableChannelsView(APIView):
     permission_classes = [IsAdmin]
@@ -356,7 +366,7 @@ class CompanyListView(generics.ListAPIView):
     pagination_class = CompanyListPagination
 
     filter_backends = [SearchFilter, OrderingFilter]
-    search_fields = ['name', 'email']
+    search_fields = ['name']
     ordering_fields = ['created_at', 'name']
     
     def get_queryset(self):

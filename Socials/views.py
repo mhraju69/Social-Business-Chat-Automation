@@ -174,12 +174,7 @@ def facebook_callback(request):
     if _from == "app":
         return render(request,'redirect.html')
     else:
-        return JsonResponse({
-            "status": "success",
-            "message": "Facebook pages connected and subscribed successfully",
-            "pages": saved_pages,
-        "subscription_details": subscription_results
-    })
+        return redirect(settings.FRONTEND_URL+"/user/integrations")
 
 class InstagramConnectView(APIView):
     # permission_classes = [AllowAny]
@@ -284,11 +279,7 @@ def instagram_callback(request):
     if _from == "app":
         return render(request,'redirect.html')
     else:
-        return Response({
-        "status": "debug",
-        "pages_checked": len(debug_pages),
-        "pages": debug_pages
-    })
+        return redirect(settings.FRONTEND_URL+"/user/integrations")
 
 
 class ChatProfileView(RetrieveUpdateAPIView):
