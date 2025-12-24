@@ -1,5 +1,7 @@
 import logging,requests
 from .models import *
+from Finance.models import *
+from django.utils import timezone
 from django.conf import settings
 logger = logging.getLogger(__name__)
 from django.core.mail import EmailMultiAlternatives
@@ -143,6 +145,6 @@ def get_location(ip):
         
 def check_plan(company):
     plan = Subscriptions.objects.filter(company=company).first()
-    if not plan or not plan.is_active or plan.end < datetime.now():
+    if not plan or not plan.active or plan.end < timezone.now():
         return False
     return True

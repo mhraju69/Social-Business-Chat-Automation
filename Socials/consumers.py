@@ -8,6 +8,7 @@ from channels.layers import get_channel_layer
 from channels.db import database_sync_to_async
 from django.contrib.auth import get_user_model
 from django.conf import settings
+from django.utils import timezone
 from Socials.models import *
 from Ai.ai_service import get_ai_response
 from rest_framework_simplejwt.tokens import AccessToken
@@ -282,7 +283,7 @@ def broadcast_message(profile, client_obj, message_text, message_type, room_id=N
         channel_layer = get_channel_layer()
         group_name = f"chat_{profile.platform}_{profile.profile_id}"
 
-        from datetime import datetime
+
         
         # Group এ message পাঠাই
         async_to_sync(channel_layer.group_send)(
@@ -293,7 +294,7 @@ def broadcast_message(profile, client_obj, message_text, message_type, room_id=N
                 'client_id': client_obj.name if client_obj.name else client_obj.client_id,
                 'message': message_text,
                 'message_type': message_type,
-                'timestamp': datetime.now().isoformat(),
+                'timestamp': timezone.now().isoformat(),
                 'room_id': room_id
             }
         )

@@ -5,7 +5,7 @@ import requests
 from Ai.ai_service import get_ai_response
 from django.core.cache import cache
 from django_redis import get_redis_connection
-from datetime import datetime
+
 
 
 def send_message(profile: ChatProfile, client_obj: ChatClient, message_text):
@@ -72,7 +72,7 @@ def check_token_count(company_id, count):
     if token_count is None:
         plan = Subscriptions.objects.filter(company__id=company_id).first()
 
-        if not plan or not plan.is_active or plan.end < datetime.now():
+        if not plan or not plan.is_active or plan.end < timezone.now():
             return False
 
         token_count = plan.token_count

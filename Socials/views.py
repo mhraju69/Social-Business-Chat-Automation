@@ -39,7 +39,7 @@ class FacebookConnectView(APIView):
             f"&redirect_uri={redirect_uri}"
             f"&scope={scope}"
             f"&state={state}"
-            f"&from={request.data.get('from',"web")}"
+            f"&from={request.query_params.get('from',"web")}"
         )
 
         return Response({"redirect_url": fb_login_url})
@@ -91,6 +91,7 @@ def facebook_callback(request):
     error = request.GET.get("error")
     state = request.GET.get("state")
     _from = request.GET.get("from")
+    print(f"Facebook callback: code={code}, error={error}, state={state}, from={_from}")
 
     if error:
         return JsonResponse({"error": error})
@@ -192,7 +193,7 @@ class InstagramConnectView(APIView):
             f"&redirect_uri={redirect_uri}"
             f"&scope={scope}"
             f"&state={state}"
-            f"&from={request.data.get('from',"web")}"
+            f"&from={request.query_params.get('from',"web")}"
         )
         return Response({"redirect_url":fb_login_url})
 
@@ -289,11 +290,20 @@ class ChatProfileView(RetrieveUpdateAPIView):
     def get_object(self):
         platform = self.request.query_params.get("platform") or self.request.data.get("platform") or "facebook"
         
+        target_user = self.request.user
+        
+        # If employee, switch target_user to the company owner
+        if getattr(self.request.user, 'role', '') == 'employee':
+            # Employee linked via email
+            employee = Employee.objects.filter(email__iexact=self.request.user.email).first()
+            if employee and employee.company:
+                target_user = employee.company.user
+        
         try:
-            return ChatProfile.objects.get(user=self.request.user, platform=platform)
+            return ChatProfile.objects.get(user=target_user, platform=platform)
         except ChatProfile.DoesNotExist:
             raise NotFound(detail=f"ChatProfile with platform '{platform}' not found.")
-        
+ 
 class CommonAskedLeaderboard(APIView):
     def get(self, request):
         company = Company.objects.filter(user=request.user).first()

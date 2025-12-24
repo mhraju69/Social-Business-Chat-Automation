@@ -142,7 +142,7 @@ class CompanyDetailUpdateView(generics.RetrieveUpdateAPIView):
         If the user has multiple companies, take the first one.
         """
         # Use .first() to get a single instance from RelatedManager
-        company = self.request.user.company
+        company = Company.objects.filter(user=self.request.user).first()
         if not company:
             # Optional: raise 404 if user has no company
             from rest_framework.exceptions import NotFound
@@ -184,7 +184,7 @@ class AddEmployeeView(APIView):
         if not check_plan(company):
             return Response({'error': 'No valid plan found'}, status=404)
         
-        if not plan.user_limit <= len(employees):
+        if not plan.plan.user_limit <= len(employees):
             return Response({'error': 'User limit exceeded, please upgrade your plan to add more Employees.'}, status=400)
         
         employee_data = []
@@ -238,7 +238,7 @@ class AddEmployeeView(APIView):
         )
         
         # Create employee with roles
-        employee = Employee.objects.create(company=company, roles=roles,email=email)
+        employee = Employee.objects.create(company=company, roles=roles,email=user.email)
         
         # Send invitation (assuming this function exists)
         send_employee_invitation(email, password, company.name,roles)

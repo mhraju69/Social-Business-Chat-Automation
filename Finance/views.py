@@ -55,16 +55,16 @@ def create_checkout_session_for_service(request):
 
 @csrf_exempt
 @api_view(["POST"])
-@permission_classes([AllowAny])
+@permission_classes([IsAuthenticated])
 def create_checkout_session_for_subscription(request):
     try:
-        company_id = request.data.get("company_id")
+        company = Company.objects.filter(user=request.user).first()
         plan_id = request.data.get("plan_id")
         auto_renew = request.data.get("auto_renew")
 
         # Call stripe function
         payment = create_stripe_checkout_for_subscription(
-            company_id,
+            company.id,
             plan_id,
             auto_renew
         )
@@ -315,20 +315,3 @@ class CheckPlan(APIView):
         paln = Subscriptions.objects.filter(company=company,active=True)
         
         return Response(SubscriptionSerializer(paln,many=True).data)
-    
-class CreateSubscriptionsView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
-    
-    def post(self, request):
-        company = Company.objects.filter(user=request.user).first()
-        if not company:
-            return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
-        plan = request.data.get('plan_id')
-        if not plan:
-            return Response({"error": "Plan ID is required"}, status=status.HTTP_400_BAD_REQUEST)
-        plan = Plan.objects.filter(id=plan).first()
-        if not plan:
-            return Response({"error": "Plan not found"}, status=status.HTTP_404_NOT_FOUND)
-        subscriptions = Subscriptions.objects.create(company=company, plan=plan)
-        serializer = SubscriptionSerializer(subscriptions)
-        return Response(serializer.data)

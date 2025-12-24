@@ -34,9 +34,16 @@ class UserSerializer(serializers.ModelSerializer):
         return instance
     
     def get_company(self, obj):
+        # Check if user is company owner
         company = Company.objects.filter(user=obj).first()
         if company:
             return CompanySerializer(company).data
+            
+        # Check if user is an employee
+        employee = Employee.objects.filter(email=obj.email).first()
+        if employee:
+            return CompanySerializer(employee.company).data
+            
         return None
     
     def get_status(self, obj):
@@ -68,22 +75,36 @@ class LoginSerializer(serializers.Serializer):
         if not user.check_password(password):
             raise serializers.ValidationError("Invalid email or password.")
         if not user.is_active:
-            # otp = user.user_otp.first()
-            # if otp and otp.is_expired():
-            #     send_otp(user.email, 'Login')
             raise serializers.ValidationError("Account is not active. Please verify your email to activate your account.")
         # Generate JWT tokens
         refresh = RefreshToken.for_user(user)
         access = refresh.access_token
-        ua_string = request.META.get('HTTP_USER_AGENT', '')
+        try:
+            ua_string = request.META.get('HTTP_USER_AGENT', '')
+            print(f"☘️☘️☘️☘️☘️☘️User Agent: {ua_string}")
+            
+            # Try custom format first
+            details = ua_string.split(",")
+            if len(details) >= 3:
+                device = f"{details[0].strip()} {details[1].strip()}"
+                platform = details[2].strip()
+            else:
+                raise ValueError("Not in custom format")
+        except:
+            # Fallback to standard user agent parsing
+            print(f"☘️☘️☘️☘️☘️☘️User Agent (Fallback): {ua_string}")
+            try:
+                details = ua_string.split("/")
+                if len(details) >= 3:
+                    device = f"{details[0].strip()} {details[1].strip()}"
+                    platform = details[2].strip()
+                device = details[0].strip() + " " + details[1].strip()
+                platform = details[2].strip()
+            except Exception as e:
+                print(f"Error parsing user agent: {e}")
+                device = "Unknown"
+                platform = "Unknown"
 
-        print(f"☘️☘️☘️☘️☘️☘️User Agent: {ua_string}")
-        
-        # details = ua_string.split(",")
-        # device = f"{details[0].strip()} {details[1].strip()}"
-        # platform = details[2].strip()
-        device = "Desktop"
-        platform = "Desktop"
         session = UserSession.objects.create(
             user=user,
             device=device,
@@ -92,8 +113,10 @@ class LoginSerializer(serializers.Serializer):
             token=str(access['jti']),
             location=get_location(get_client_ip(request))
         )
+        employee = Employee.objects.filter(email__iexact=user.email).first()
         return {
             "user": UserSerializer(user).data,
+            "role": employee.roles if employee else None,
             "session_id": session.id,
             "refresh": str(refresh),
             "access": str(access),  # Use the same access token, not a new one!
