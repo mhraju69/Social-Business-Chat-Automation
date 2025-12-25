@@ -79,31 +79,60 @@ class LoginSerializer(serializers.Serializer):
         # Generate JWT tokens
         refresh = RefreshToken.for_user(user)
         access = refresh.access_token
+        # Try to parse User Agent and Client Info
         try:
             ua_string = request.META.get('HTTP_USER_AGENT', '')
             print(f"☘️☘️☘️☘️☘️☘️User Agent: {ua_string}")
             
-            # Try custom format first
             details = ua_string.split(",")
-            if len(details) >= 3:
-                device = f"{details[0].strip()} {details[1].strip()}"
-                platform = details[2].strip()
-            else:
-                raise ValueError("Not in custom format")
-        except:
-            # Fallback to standard user agent parsing
-            print(f"☘️☘️☘️☘️☘️☘️User Agent (Fallback): {ua_string}")
+            device = f"{details[0].strip()} {details[1].strip()}"
+            platform = details[2].strip()
+            
+        except :
+            
+            ua_string = request.META.get('HTTP_USER_AGENT', '')
+            client_info_str = request.META.get('HTTP_X_CLIENT_INFO', '')
+            
+            device = "Unknown"
+            platform = "Unknown"
+            
             try:
-                details = ua_string.split("/")
-                if len(details) >= 3:
-                    device = f"{details[0].strip()} {details[1].strip()}"
-                    platform = details[2].strip()
-                device = details[0].strip() + " " + details[1].strip()
-                platform = details[2].strip()
+                if client_info_str:
+                    import json
+                    client_data = json.loads(client_info_str)
+                    p_platform = client_data.get('platform', '')
+                    platform = p_platform if p_platform else "Unknown"
             except Exception as e:
-                print(f"Error parsing user agent: {e}")
-                device = "Unknown"
-                platform = "Unknown"
+                print(f"Error parsing HTTP_X_CLIENT_INFO: {e}")
+
+            try:
+                from user_agents import parse
+                user_agent = parse(ua_string)
+                
+                d_family = user_agent.device.family
+                if d_family == "Other":
+                    d_family = "Desktop" # Or just Generic
+                
+                device = f"{d_family} / {user_agent.browser.family} {user_agent.browser.version_string}"
+                platform = f"{user_agent.os.family} {user_agent.os.version_string}"
+                
+            except ImportError:
+                pass
+            except Exception as e:
+                print(f"Error parsing User Agent with lib: {e}")
+                try:
+                    if "Windows" in ua_string:
+                        platform = "Windows"
+                        device = "Desktop"
+                    elif "Android" in ua_string:
+                        platform = "Android"
+                        device = "Mobile"
+                    elif "iPhone" in ua_string:
+                        platform = "iOS"
+                        device = "Mobile"
+                except:
+                    pass
+
 
         session = UserSession.objects.create(
             user=user,
@@ -113,6 +142,18 @@ class LoginSerializer(serializers.Serializer):
             token=str(access['jti']),
             location=get_location(get_client_ip(request))
         )
+        
+        # Trigger AI Analysis Pre-warming
+        try:
+            # Check if user has a company attributed to them
+            if hasattr(user, 'company'):
+                from Ai.tasks import analyze_company_data_task
+                # Run in background
+                analyze_company_data_task.delay(user.company.id)
+        except Exception as e:
+            # logging.error(f"Failed to trigger analysis task: {e}")
+            print(f"Failed to trigger analysis task: {e}")
+
         employee = Employee.objects.filter(email__iexact=user.email).first()
         return {
             "user": UserSerializer(user).data,
@@ -120,7 +161,7 @@ class LoginSerializer(serializers.Serializer):
             "session_id": session.id,
             "refresh": str(refresh),
             "access": str(access),  # Use the same access token, not a new one!
-        }  
+        }
     
 class CompanySerializer(serializers.ModelSerializer):
     class Meta:
@@ -137,3 +178,10 @@ class EmployeeSerializer(serializers.ModelSerializer):
     class Meta:
         model = Employee
         fields = ['id','email','roles']
+
+class UserSessionSerializer(serializers.ModelSerializer):
+    is_current = serializers.BooleanField(read_only=True, default=False)
+    
+    class Meta:
+        model = UserSession
+        fields = ['id', 'device', 'browser', 'ip_address', 'location', 'last_active', 'is_active', 'is_current']

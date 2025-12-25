@@ -345,10 +345,27 @@ def calculate_data_health(counts: Dict[str, int], details: Dict[str, Any]) -> Di
 
 # --- Main Entry Point ---
 
-def analyze_company_data(company_id: int) -> Dict[str, Any]:
+from django.core.cache import cache
+
+# ... (Previous imports kept by context, but I need to make sure I don't break them)
+
+# --- Main Entry Point ---
+
+def get_analysis_cache_key(company_id: int) -> str:
+    return f"company_analysis_v1_{company_id}"
+
+def analyze_company_data(company_id: int, force_refresh: bool = False) -> Dict[str, Any]:
     """
     Main orchestration function.
     """
+    cache_key = get_analysis_cache_key(company_id)
+    
+    if not force_refresh:
+        cached_data = cache.get(cache_key)
+        if cached_data:
+            logger.info(f"Returning cached analysis for Company {company_id}")
+            return cached_data
+
     logger.info(f"Starting analysis for Company {company_id} using Vector DB")
     
     # 1. Fetch from Vector DB
@@ -365,12 +382,15 @@ def analyze_company_data(company_id: int) -> Dict[str, Any]:
 
     if not chunks:
         # If no data found in Qdrant, return 0s
-        return {
+        empty_result = {
             "companyId": str(company_id),
             "counts": {"companyInfo": 0, "services": 0, "prices": 0, "openingHours": 0, "policies": 0, "faqs": 0},
             "missingOrSuggestedData": ["No data found in Vector Index"],
             "dataHealth": {"score": 0, "reasoning": "No knowledge data found.", "enrichmentSuggestions": ["Sync your data to the AI Knowledge Base"]}
         }
+        # Iterate over empty result is fast, but cache it anyway
+        cache.set(cache_key, empty_result, timeout=60*60*24*7) # 7 days
+        return empty_result
         
     # 2. Extract
     extracted_results = []
@@ -398,5 +418,8 @@ def analyze_company_data(company_id: int) -> Dict[str, Any]:
         "missingOrSuggestedData": health_data["enrichmentSuggestions"], 
         "dataHealth": health_data
     }
+    
+    # Set cache
+    cache.set(cache_key, final_output, timeout=60*60*24*7) # 7 days
     
     return final_output

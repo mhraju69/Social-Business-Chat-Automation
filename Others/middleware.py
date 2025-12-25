@@ -18,21 +18,18 @@ class UpdateLastActiveMiddleware:
             user, token = user_auth
             try:
                 jti = str(token['jti'])
-                return self.get_response(request)
             except Exception:
                 pass
             session = UserSession.objects.filter(user=user, token=jti).first()
             
             if session:
-                
                 if not session.is_active:
                     raise PermissionDenied("Session expired or logged out")
                 
                 session.last_active = now()
                 session.save()
             else:
-                all_sessions = UserSession.objects.filter(user=user)
-                for s in all_sessions:
-                    s.is_active = False
-                    s.save()
+                # If session is missing (e.g. deleted by 'logout all'), deny access
+                raise PermissionDenied("Session invalid or terminated")
+                
         return self.get_response(request)

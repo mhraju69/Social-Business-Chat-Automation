@@ -20,6 +20,7 @@ from .helper import *
 import urllib.parse
 from django.shortcuts import render
 from Ai.tasks import sync_company_knowledge_task
+from Ai.data_analysis import analyze_company_data
 
 class ClientBookingView(APIView):
     permission_classes = [permissions.IsAuthenticated]
@@ -847,7 +848,30 @@ class ActiveSessionsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        sessions = UserSession.objects.filter(user=request.user,is_active=True)
+        try:
+            jti = request.auth.get('jti')
+        except:
+            jti = None
+            
+        current_session = UserSession.objects.filter(token=jti).first()
+        
+        # Get last 5 sessions (excluding current if possible to avoid dupes in logic, then attach)
+        # But user wants current at top.
+        
+        other_sessions_qs = UserSession.objects.filter(user=request.user).order_by('-last_active')
+        
+        if current_session:
+            other_sessions_qs = other_sessions_qs.exclude(id=current_session.id)
+            
+        other_sessions = list(other_sessions_qs[:4]) # Take up to 4 others
+        
+        sessions = []
+        if current_session:
+            current_session.is_current = True # Annotation for serializer
+            sessions.append(current_session)
+            
+        sessions.extend(other_sessions)
+        
         data = [{
             "device": s.device,
             "browser": s.browser,
@@ -855,6 +879,7 @@ class ActiveSessionsView(APIView):
             "ip": s.ip_address,
             "last_active": s.last_active,
             "session_id": s.id,
+            "is_active" : s.is_active
         } for s in list(reversed(sessions))[:5]]
 
         return Response(data)
@@ -875,7 +900,7 @@ class LogoutAllSessionsView(APIView):
     permission_classes = [IsAuthenticated] 
 
     def post(self, request):
-        try:
+        try:    
             sessions = UserSession.objects.filter(user=request.user, is_active=True)
             sessions.update(is_active=False)
             return Response({"message": "Logout successful"})
@@ -1185,7 +1210,30 @@ class KnowledgeCategoryView(APIView):
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
         
         return Response({
+            "heath" : analyze_company_data(company.id),
             "opening_hours": OpeningHours.objects.filter(company=company).count(),
             "knowledge_base": KnowledgeBase.objects.filter(user=request.user).count(),
             "services": Service.objects.filter(company=company).count(),
         })
+
+class SyncKnowledgeView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        try:
+            company = Company.objects.filter(user=request.user).first()
+            if not company:
+                return Response({'error': 'Company not found'}, status=status.HTTP_404_NOT_FOUND)
+            
+            # Start the Celery task
+            sync_company_knowledge_task.delay(company.id)
+            
+            return Response(
+                {"message": "Knowledge sync started successfully"}, 
+                status=status.HTTP_200_OK
+            )
+        except Exception as e:
+            return Response(
+                {"error": f"Failed to start sync: {str(e)}"}, 
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

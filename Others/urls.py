@@ -28,4 +28,5 @@ urlpatterns = [
     path('ai-training-files/', AITrainingFileBulkUploadView.as_view(), name='ai-training-files'),
     path('validate-token/', ValidateTokenView.as_view(), name='validate-token'),
     path('knowledge-category/', KnowledgeCategoryView.as_view()),
+    path('sync-knowledge/', SyncKnowledgeView.as_view()),
 ]
