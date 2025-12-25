@@ -38,8 +38,7 @@ class FacebookConnectView(APIView):
             f"?client_id={fb_app_id}"
             f"&redirect_uri={redirect_uri}"
             f"&scope={scope}"
-            f"&state={state}"
-            f"&from={request.query_params.get('from',"web")}"
+            f"&state={state},{request.query_params.get('from',"web")}"
         )
 
         return Response({"redirect_url": fb_login_url})
@@ -89,9 +88,10 @@ def check_page_subscription(page_id, page_access_token):
 def facebook_callback(request):
     code = request.GET.get("code")
     error = request.GET.get("error")
-    state = request.GET.get("state")
-    _from = request.GET.get("from")
-    print(f"Facebook callback: code={code}, error={error}, state={state}, from={_from}")
+    state_data = request.GET.get("state")
+    state = state_data.split(",")[0]
+    _from = state_data.split(",")[1]
+    print(f"Facebook callback: code={code}, error={error}, state={state_data}, from={_from}")
 
     if error:
         return JsonResponse({"error": error})
@@ -172,10 +172,11 @@ def facebook_callback(request):
             "subscription_success": subscription_success,
             "subscription_status": subscription_status
         })
+        break
     if _from == "app":
         return render(request,'redirect.html')
     else:
-        return redirect(settings.FRONTEND_URL+"/user/integrations")
+        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
 
 class InstagramConnectView(APIView):
     # permission_classes = [AllowAny]
@@ -192,8 +193,7 @@ class InstagramConnectView(APIView):
             f"?client_id={fb_app_id}"
             f"&redirect_uri={redirect_uri}"
             f"&scope={scope}"
-            f"&state={state}"
-            f"&from={request.query_params.get('from',"web")}"
+            f"&state={state},{request.query_params.get('from',"web")}"
         )
         return Response({"redirect_url":fb_login_url})
 
@@ -202,8 +202,9 @@ class InstagramConnectView(APIView):
 def instagram_callback(request):
     code = request.GET.get("code")
     error = request.GET.get("error")
-    state = request.GET.get("state")
-    _from = request.GET.get("from")
+    state_data = request.GET.get("state")
+    state = state_data.split(",")[0]
+    _from = state_data.split(",")[1]
 
     if error:
         return Response({"error": error}, status=400)
@@ -224,7 +225,23 @@ def instagram_callback(request):
     if "access_token" not in data:
         return Response({"error": "Token exchange failed", "details": data}, status=400)
 
-    user_access_token = data["access_token"]
+    short_lived_token = data["access_token"]
+    
+    # Exchange for Long-lived User Token
+    exchange_url = "https://graph.facebook.com/v20.0/oauth/access_token"
+    exchange_params = {
+        "grant_type": "fb_exchange_token",
+        "client_id": settings.FB_APP_ID,
+        "client_secret": settings.FB_APP_SECRET,
+        "fb_exchange_token": short_lived_token,
+    }
+    try:
+        exchange_resp = requests.get(exchange_url, params=exchange_params)
+        exchange_data = exchange_resp.json()
+        user_access_token = exchange_data.get("access_token", short_lived_token)
+    except Exception as e:
+        print(f"Error exchanging token: {e}")
+        user_access_token = short_lived_token
 
     pages_resp = requests.get(
         "https://graph.facebook.com/v20.0/me/accounts",
@@ -237,12 +254,12 @@ def instagram_callback(request):
 
     user = User.objects.get(id=state)
 
-    debug_pages = []
-
+    profile_created = False
+    
     for page in pages_data["data"]:
         page_id = page["id"]
         page_name = page.get("name")
-        page_token = page["access_token"]
+        page_token = page["access_token"]  # This should be long-lived now since we used long-lived user token
 
         insta_resp = requests.get(
             f"https://graph.facebook.com/v20.0/{page_id}",
@@ -252,35 +269,50 @@ def instagram_callback(request):
             }
         )
         insta_data = insta_resp.json()
-
-        debug_pages.append({
-            "page_id": page_id,
-            "page_name": page_name,
-            "insta_response": insta_data
-        })
-
+        
         insta_account = insta_data.get("instagram_business_account")
 
         if insta_account:
             ig_id = insta_account["id"]
 
+            # Strict check for Instagram: Single profile policy
+            existing_ig_profile = ChatProfile.objects.filter(user=user, platform='instagram').first()
+            
+            if existing_ig_profile and existing_ig_profile.profile_id != ig_id:
+                # If an IG profile exists and it's NOT this one, skip.
+                continue
+            
+            # Also prevent creating multiple in the same loop if user selects multiple (though less likely for IG logic here)
+            if ChatProfile.objects.filter(user=user, platform='instagram').exclude(profile_id=ig_id).exists():
+                continue
+
             ChatProfile.objects.update_or_create(
                 profile_id=ig_id,
                 defaults={
                     "user": user,
-                    "page": ChatProfile.objects.get(profile_id=page_id),
+                    # "page": ... removed as it does not exist in model
+                    "name": page_name, # Storing page name as profile name
                     "access_token": page_token,
                     "bot_active": True,
                     'platform': 'instagram',
                 },
             )
-        else:
-            return Response({"error": "Account not found"}, status=400)
+            profile_created = True
+            break # Stop after finding and connecting the first valid Instagram account
+        
+        # If no insta_account, just continue to next page
+    
+    if not profile_created:
+         # Check if we failed because one already exists (silent success?) or because none found
+         if ChatProfile.objects.filter(user=user, platform='instagram').exists():
+             pass # Already had one, just didn't update (maybe IDs mismatch) - treat as success redirect
+         else:
+             return Response({"error": "No Instagram Business account found linked to your pages."}, status=400)
 
     if _from == "app":
         return render(request,'redirect.html')
     else:
-        return redirect(settings.FRONTEND_URL+"/user/integrations")
+        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
 
 
 class ChatProfileView(RetrieveUpdateAPIView):

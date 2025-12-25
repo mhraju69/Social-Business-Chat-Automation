@@ -386,21 +386,26 @@ class UserAlertsView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        user = request.user  # SimpleJWT automatically sets request.user
-        alerts = Alert.objects.filter(user=user)
+        try:
+            company = Company.objects.get(user=request.user)
+        except Company.DoesNotExist:
+            return Response({"error": "User has no company"}, status=400)
+
+        alerts = Alert.objects.filter(company=company).order_by('-time')
         serializer = AlertSerializer(alerts, many=True)
         return Response(serializer.data)
-    
+
 class MarkAlertReadView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, alert_id):
         try:
-            alert = Alert.objects.get(id=alert_id, user=request.user)
+            company = Company.objects.get(user=request.user)
+            alert = Alert.objects.get(id=alert_id, company=company)
             alert.is_read = True
             alert.save()
             return Response({"detail": "Alert marked as read"})
-        except Alert.DoesNotExist:
+        except (Company.DoesNotExist, Alert.DoesNotExist):
             return Response({"detail": "Alert not found"}, status=status.HTTP_404_NOT_FOUND)
 
 class KnowledgeBaseListCreateView(generics.ListCreateAPIView):

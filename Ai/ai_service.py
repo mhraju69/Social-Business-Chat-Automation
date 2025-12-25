@@ -433,6 +433,22 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         token_usage["output_tokens"] += usage.get('completion_tokens', 0)
         token_usage["total_tokens"] += usage.get('total_tokens', 0)
 
+    # Define helper to deduct tokens
+    def deduct_tokens_now():
+        try:
+            total = token_usage.get("total_tokens", 0)
+            if total > 0:
+                # Local import to avoid any potential top-level circular dependency risks, though checked it seems fine.
+                # Actually, standard import is better if safe. But let's use global import if possible or inside method.
+                # Using lookup inside to be safe and clean.
+                from Finance.models import Subscriptions 
+                sub = Subscriptions.objects.filter(company_id=company_id, active=True).first()
+                if sub:
+                    sub.deduct_tokens(total)
+                    logger.info(f"Deducted {total} tokens for company {company_id}")
+        except Exception as e:
+            logger.error(f"Error deducting tokens: {e}")
+
     # 5. Intent Handling (JSON Parsing)
     try:
         # Try to extract JSON from markdown code blocks first
@@ -493,11 +509,13 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
 
                 # Check if it returned JSON again (loop), if so, force text
                 if "action" in response_text and "check_availability" in response_text:
+                     deduct_tokens_now()
                      return {
                          "content": f"I checked the slots. {system_msg}",
                          "token_usage": token_usage
                      }
                 
+                deduct_tokens_now()
                 return {
                     "content": response_text,
                     "token_usage": token_usage
@@ -513,18 +531,21 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                     booking = create_booking(mock_req, company_id)
                     # Assuming create_booking returns a Booking object or Response
                     if hasattr(booking, 'id'):
+                         deduct_tokens_now()
                          return {
                              "content": f"Booking confirmed! Your appointment for {booking.title} is set for {booking.start_time}.",
                              "token_usage": token_usage
                          }
                     else:
                          # It might return a Response object with errors
+                         deduct_tokens_now()
                          return {
                              "content": "I encountered an issue processing your booking. Please try again.",
                              "token_usage": token_usage
                          }
                 except Exception as e:
                     logger.error(f"Booking creation failed: {e}")
+                    deduct_tokens_now()
                     return {
                         "content": "Sorry, I couldn't complete the booking at this moment.",
                         "token_usage": token_usage
@@ -535,6 +556,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         print(f"DEBUG: JSON parsing failed: {e}")
         pass
 
+    deduct_tokens_now()
     return {
         "content": response_text,
         "token_usage": token_usage

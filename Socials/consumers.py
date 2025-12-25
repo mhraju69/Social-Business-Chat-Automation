@@ -310,9 +310,13 @@ class AlertConsumer(AsyncWebsocketConsumer):
         self.user = await self.get_user_from_token(self.token)
 
         if self.user:
-            self.group_name = f"alerts_{self.user.id}"
-            await self.channel_layer.group_add(self.group_name, self.channel_name)
-            await self.accept()
+            self.company = await self.get_company_for_user(self.user)
+            if self.company:
+                self.group_name = f"alerts_company_{self.company.id}"
+                await self.channel_layer.group_add(self.group_name, self.channel_name)
+                await self.accept()
+            else:
+                 await self.close()
         else:
             await self.close()
 
@@ -334,20 +338,25 @@ class AlertConsumer(AsyncWebsocketConsumer):
         except Exception as e:
             print(f"❌ Token Error: {e}")
             return None
+            
+    @database_sync_to_async
+    def get_company_for_user(self, user):
+        return Company.objects.filter(user=user).first()
 
-def send_alert(user, title, subtitle="", type="info"):
+def send_alert(company, title, subtitle="", type="info"):
     # 1. Save to DB
     alert = Alert.objects.create(
-        user=user,
+        company=company,
         title=title,
         subtitle=subtitle,
-        type=type
+        type=type,
+        time=timezone.now()
     )
 
     # 2. Send real-time via WebSocket
     channel_layer = get_channel_layer()
     async_to_sync(channel_layer.group_send)(
-        f"alerts_{user.id}",  
+        f"alerts_company_{company.id}",  
         {
             "type": "send_alert", 
             "alert": AlertSerializer(alert).data

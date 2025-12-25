@@ -40,6 +40,7 @@ class Subscriptions(models.Model):
     end = models.DateTimeField(blank=True, null=True)
     active = models.BooleanField(default=True)
     auto_renew = models.BooleanField(default=False)
+    token_count = models.IntegerField(default=0)
     history = HistoricalRecords()
 
     def save(self, *args, **kwargs):
@@ -60,6 +61,12 @@ class Subscriptions(models.Model):
 
             elif plan_obj.duration == 'years':
                 self.end = self.start + relativedelta(years=1)
+        
+        # Initialize token_count from Plan if not set (new subscription)
+        if self.token_count == 0 and plan_obj and not self.pk:
+             # If we want to allow carry-over, logic would be different. 
+             # Assuming reset on new subscription/renewal.
+             self.token_count = plan_obj.token_limit
 
         super().save(*args, **kwargs)
 
@@ -68,6 +75,27 @@ class Subscriptions(models.Model):
             active=True,
             end__gte=timezone.now()
         ).update(active=False)
+
+    def deduct_tokens(self, amount):
+        """
+        Deduct tokens from the subscription and update Redis cache.
+        """
+        if amount <= 0:
+            return
+
+        self.token_count -= amount
+        self.save(update_fields=['token_count'])
+
+        # Update Redis to keep it in sync with Socials/helper.py
+        try:
+            from django_redis import get_redis_connection
+            redis = get_redis_connection("default")
+            cache_key = f"company_token_{self.company.id}"
+            redis.set(cache_key, self.token_count)
+        except ImportError:
+            pass # django_redis might not be installed or configured in all envs
+        except Exception as e:
+            print(f"Error updating redis cache: {e}")
 
     def __str__(self):
         return f"{self.company} - {self.plan.name}"

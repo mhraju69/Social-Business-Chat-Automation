@@ -81,10 +81,10 @@ class IsAdmin(BasePermission):
         )
 
 
-class IsOwner(BasePermission):
+class IsOwnerOrEmployee(BasePermission):
     """Allow access only to owners."""
     def has_permission(self, request, view):
-        return bool(request.user and request.user.is_authenticated and request.user.is_owner)
+        return bool(request.user and request.user.is_authenticated and (request.user.is_owner or request.user.is_employee))
 
 
 class IsEmployee(BasePermission):
@@ -93,7 +93,7 @@ class IsEmployee(BasePermission):
         return bool(request.user and request.user.is_authenticated and request.user.is_employee)
 
 
-class IsOwnerOrEmploye(BasePermission):
+class IsOwnerOrEmployee(BasePermission):
     """Allow access to admins or owners."""
     def has_permission(self, request, view):
         return bool(

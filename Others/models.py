@@ -142,7 +142,7 @@ class Alert(models.Model):
         ("error", "Error"),
     ]
 
-    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="alerts")
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="alerts")
     title = models.CharField(max_length=255)
     subtitle = models.CharField(max_length=255, blank=True, null=True)
     time = models.DateTimeField(auto_now_add=True)
@@ -150,7 +150,7 @@ class Alert(models.Model):
     is_read = models.BooleanField(default=False)
 
     def __str__(self):
-        return f"{self.user.email} - {self.title}"
+        return f"{self.company.name} - {self.title}"
 
 class KnowledgeBase(models.Model):  
     user = models.ForeignKey(settings.AUTH_USER_MODEL, related_name='knowledge_base',  on_delete=models.CASCADE,)

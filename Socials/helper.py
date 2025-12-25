@@ -5,8 +5,8 @@ import requests
 from Ai.ai_service import get_ai_response
 from django.core.cache import cache
 from django_redis import get_redis_connection
-
-
+from Others.models import Alert
+from Accounts.models import Company
 
 def send_message(profile: ChatProfile, client_obj: ChatClient, message_text):
     try:
@@ -72,7 +72,7 @@ def check_token_count(company_id, count):
     if token_count is None:
         plan = Subscriptions.objects.filter(company__id=company_id).first()
 
-        if not plan or not plan.is_active or plan.end < timezone.now():
+        if not plan or not plan.active or plan.end < timezone.now():
             return False
 
         token_count = plan.token_count
@@ -86,6 +86,27 @@ def check_token_count(company_id, count):
 
                 if current_tokens < count:
                     pipe.unwatch()
+                    
+                    # Logic: Deactivate Chat Profiles + Send Alert
+                    try:
+                        company = Company.objects.get(id=company_id)
+                        
+                        # 1. Deactivate Chat Profiles
+                        ChatProfile.objects.filter(user=company.user).update(bot_active=False)
+                        
+                        # 2. Check if alert already exists recently to avoid spamming?
+                        # For now, just create it.
+                        Alert.objects.create(
+                            company=company,
+                            title="Token Limit Reached",
+                            subtitle="Your AI tokens have been exhausted. Chat profiles are now inactive.",
+                            type="error"
+                        )
+                        print(f"⚠️ Tokens exhausted for Company {company_id}. Profiles deactivated.")
+                        
+                    except Exception as e:
+                        print(f"Error handling token exhaustion: {e}")
+
                     return False
 
                 new_token_count = current_tokens - count

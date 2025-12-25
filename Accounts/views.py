@@ -184,7 +184,8 @@ class AddEmployeeView(APIView):
         if not check_plan(company):
             return Response({'error': 'No valid plan found'}, status=404)
         
-        if not plan.plan.user_limit <= len(employees):
+        # Logic fixed: return error if limit is reached or exceeded
+        if len(employees) >= plan.plan.user_limit:
             return Response({'error': 'User limit exceeded, please upgrade your plan to add more Employees.'}, status=400)
         
         employee_data = []
@@ -225,6 +226,16 @@ class AddEmployeeView(APIView):
         except Company.DoesNotExist:
             return Response({'error': 'Company not found.'}, status=404)
         
+        # Check Plan and User Limit
+        if not check_plan(company):
+             return Response({'error': 'No valid plan found or subscription expired.'}, status=400)
+
+        plan_subscription = Subscriptions.objects.filter(company=company).first()
+        current_employees_count = Employee.objects.filter(company=company).count()
+        
+        if current_employees_count >= plan_subscription.plan.user_limit:
+            return Response({'error': 'User limit exceeded. Please upgrade your plan to add more employees.'}, status=400)
+
         if User.objects.filter(email=email).exists():
             return Response({'error': 'User with this email already exists.'}, status=400)
         
