@@ -18,7 +18,7 @@ from rest_framework import serializers
 from .serializers import AdminTeamMemberSerializer, ChannelOverviewSerializer, SimpleUserSerializer, AdminCompanySerializer
 from rest_framework.pagination import PageNumberPagination
 from datetime import timedelta
-
+from .utils import get_today
 class DashboardView(generics.GenericAPIView):
     permission_classes = [IsAdmin]
 
@@ -404,14 +404,14 @@ class PerformanceAnalyticsAPIView(generics.GenericAPIView):
 
         time_scope = request.query_params.get('time_scope', 'last_month') # today / last_month / last_year
 
-        today = datetime.date.today()
+        today_start, today_end = get_today()
 
         if time_scope == 'today':
-            data_date_start_date = today
+            data_date_start_date = today_start
         elif time_scope == 'last_month':
-            data_date_start_date = today - timedelta(days=30)
+            data_date_start_date = today_start - timedelta(days=30)
         elif time_scope == 'last_year':
-            data_date_start_date = today - timedelta(days=365)
+            data_date_start_date = today_start - timedelta(days=365)
         else:
             return Response({"error": "Invalid time_scope parameter. Use 'today', 'last_month', or 'last_year'."}, status=400)
 
@@ -421,11 +421,11 @@ class PerformanceAnalyticsAPIView(generics.GenericAPIView):
         total_revenue = Payment.objects.aggregate(total=Sum('amount'))['total'] or 0
 
         if time_scope == 'today':
-            previous_date = today - timedelta(days=1)
+            previous_date = today_start - timedelta(days=1)
         elif time_scope == 'last_month':
-            previous_date = today - timedelta(days=60)
+            previous_date = today_start - timedelta(days=60)
         elif time_scope == 'last_year':
-            previous_date = today - timedelta(days=730)
+            previous_date = today_start - timedelta(days=730)
 
         # previous month data
         message_sent_prev = ChatMessage.objects.filter(type='outgoing', created_at__gte=previous_date, created_at__lt=data_date_start_date).count()
