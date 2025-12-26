@@ -142,7 +142,7 @@ class Alert(models.Model):
         ("error", "Error"),
     ]
 
-    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="alerts")
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name="alerts", null=True)
     title = models.CharField(max_length=255)
     subtitle = models.CharField(max_length=255, blank=True, null=True)
     time = models.DateTimeField(auto_now_add=True)

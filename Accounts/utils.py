@@ -148,3 +148,18 @@ def check_plan(company):
     if not plan or not plan.active or plan.end < timezone.now():
         return False
     return True
+
+def get_company_user(user):
+    """
+    If user is employee, return the company owner (user).
+    If user is owner/admin, return the user itself.
+    """
+    if getattr(user, 'role', '') == 'employee':
+        try:
+            # Match by email since User and Employee are linked by email
+            # Use iexact for case-insensitive matching
+            employee = Employee.objects.get(email__iexact=user.email)
+            return employee.company.user
+        except Employee.DoesNotExist:
+            return None
+    return user

@@ -138,13 +138,11 @@ class CompanyDetailUpdateView(generics.RetrieveUpdateAPIView):
 
     def get_object(self):
         """
-        Return a single company instance for the logged-in user.
-        If the user has multiple companies, take the first one.
+        Return a single company instance for the logged-in user or their company owner.
         """
-        # Use .first() to get a single instance from RelatedManager
-        company = Company.objects.filter(user=self.request.user).first()
+        target_user = get_company_user(self.request.user)
+        company = Company.objects.filter(user=target_user).first()
         if not company:
-            # Optional: raise 404 if user has no company
             from rest_framework.exceptions import NotFound
             raise NotFound("No company found for this user.")
         return company
@@ -154,26 +152,30 @@ class ServiceListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        return Service.objects.filter(company=self.request.user.company)
+        target_user = get_company_user(self.request.user)
+        return Service.objects.filter(company__user=target_user)
 
     def perform_create(self, serializer):
-        serializer.save(company=self.request.user.company)
+        target_user = get_company_user(self.request.user)
+        company = Company.objects.filter(user=target_user).first()
+        serializer.save(company=company)
 
 class ServiceRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ServiceSerializer
     permission_classes = [permissions.IsAuthenticated]
 
     def get_queryset(self):
-        # Only allow access to services belonging to the user’s company
-        return Service.objects.filter(company=self.request.user.company)
+        # Only allow access to services belonging to the user’s company or owner's company
+        target_user = get_company_user(self.request.user)
+        return Service.objects.filter(company__user=target_user)
     
 class AddEmployeeView(APIView):
     permission_classes = [permissions.IsAuthenticated,IsOwner,IsEmployeeAndCanManageUsers]
 
     def get(self, request):
-        owner = request.user.email
+        target_user = get_company_user(request.user)
         try:
-            company = Company.objects.get(user__email=owner)
+            company = Company.objects.get(user=target_user)
         except Company.DoesNotExist:
             return Response({'error': 'Company not found.'}, status=404)
         
@@ -220,9 +222,9 @@ class AddEmployeeView(APIView):
         if not roles:
             return Response({'error': 'At least one role is required.'}, status=400)
         
-        owner = request.user.email
+        target_user = get_company_user(request.user)
         try:
-            company = Company.objects.get(user__email=owner)
+            company = Company.objects.get(user=target_user)
         except Company.DoesNotExist:
             return Response({'error': 'Company not found.'}, status=404)
         
@@ -261,8 +263,8 @@ class GetPermissionsView(APIView):
     permission_classes = [permissions.IsAuthenticated,IsOwner]
 
     def get(self, request,employee_id):
-        user = request.user
-        employee = Employee.objects.filter(id=employee_id,company__user__email=user.email).first()
+        target_user = get_company_user(request.user)
+        employee = Employee.objects.filter(id=employee_id, company__user=target_user).first()
 
         if not employee:
             return Response({"detail": "Employee not found."}, status=404)
@@ -306,8 +308,9 @@ class UpdatePermissionsView(APIView):
     permission_classes = [permissions.IsAuthenticated,IsOwner]
 
     def post(self, request,employee_id):
+        target_user = get_company_user(request.user)
         # Extract target employee email and new roles
-        employee = Employee.objects.filter(id=employee_id,company__user__email=request.user.email).first()
+        employee = Employee.objects.filter(id=employee_id, company__user=target_user).first()
         new_roles = request.data.get("roles")
 
         if not employee or not new_roles:

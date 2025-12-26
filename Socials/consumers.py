@@ -1,6 +1,6 @@
 import json
 from channels.generic.websocket import AsyncWebsocketConsumer
-from Accounts.models import Company
+from Accounts.models import Company, Employee
 from Others.models import Alert
 from Others.serializers import AlertSerializer
 from asgiref.sync import async_to_sync, sync_to_async
@@ -25,9 +25,15 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
                 await self.close()
                 return
 
+            # Resolve target user (owner if employee)
+            self.target_user = await self.get_target_user(self.user)
+            if not self.target_user:
+                 await self.close()
+                 return
+
             # User এর সব profile এর জন্য group join করি
             self.groups = []
-            profiles = await self.get_user_profiles(self.user)
+            profiles = await self.get_user_profiles(self.target_user)
             
             for profile in profiles:
                 group_name = f"chat_{profile.platform}_{profile.profile_id}"
@@ -41,6 +47,7 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
                 'type': 'connection_established',
                 'message': 'Successfully connected to chat',
                 'user_id': self.user.id,
+                'target_user_id': self.target_user.id,
                 'profiles': await self.get_profiles_data(profiles)
 
                         
@@ -76,7 +83,7 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
                 })
             
             # Sort rooms by timestamp (newest first)
-            rooms_list.sort(key=lambda x: x['timestamp'] or "", reverse=True)
+            rooms_list.sort(key=lambda x: x['timestamp'] or "0000-00-00", reverse=True)
             
             profile_info = {
                 'platform': p.platform,
@@ -88,11 +95,12 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
             profiles_data.append(profile_info)
 
         # Sort profiles by latest activity
-        profiles_data.sort(key=lambda x: x['_latest_timestamp'] or "", reverse=True)
+        profiles_data.sort(key=lambda x: x['_latest_timestamp'] or "0000-00-00", reverse=True)
 
         # Cleanup internal key
         for p in profiles_data:
-            del p['_latest_timestamp']
+            if '_latest_timestamp' in p:
+                del p['_latest_timestamp']
 
         return profiles_data
 
@@ -123,7 +131,7 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
 
                 # Message send করি
                 result = await self.send_outgoing_message(
-                    self.user, platform, client_id, message_text
+                    self.target_user, platform, client_id, message_text
                 )
 
                 if result.get('success'):
@@ -140,7 +148,7 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
             # --- Action: Get Room List ---
             elif action == 'get_rooms':
                 platform = data.get('platform')
-                rooms = await self.get_rooms_list(self.user, platform)
+                rooms = await self.get_rooms_list(self.target_user, platform)
                 
                 await self.send(text_data=json.dumps({
                     'type': 'rooms_list',
@@ -154,7 +162,7 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
                 limit = data.get('limit', 50)
 
                 messages = await self.get_room_messages(
-                    self.user, platform, client_id, limit
+                    self.target_user, platform, client_id, limit
                 )
 
                 await self.send(text_data=json.dumps({
@@ -200,6 +208,16 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
             return None
 
     @database_sync_to_async
+    def get_target_user(self, user):
+        """If employee, returns company owner. If owner, returns self."""
+        if getattr(user, 'role', '') == 'employee':
+            try:
+                return Employee.objects.get(email=user.email).company.user
+            except Employee.DoesNotExist:
+                return None
+        return user
+
+    @database_sync_to_async
     def get_user_profiles(self, user):
         """User এর সব active profiles"""
         return list(ChatProfile.objects.filter(user=user, bot_active=True))
@@ -207,30 +225,35 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def get_rooms_list(self, user, platform=None):
         """User এর সব rooms with latest message"""
+        from django.db.models import OuterRef, Subquery
         profiles = ChatProfile.objects.filter(user=user, bot_active=True)
         if platform:
             profiles = profiles.filter(platform=platform)
 
-        rooms = []
+        rooms_result = []
         for profile in profiles:
-            profile_rooms = ChatRoom.objects.filter(profile=profile).select_related('client')
+            last_message_qs = ChatMessage.objects.filter(room=OuterRef('pk')).order_by('-timestamp')
             
-            for room in profile_rooms:
-                last_msg = room.messages.order_by('-timestamp').first()
-                
-                rooms.append({
+            rooms = profile.rooms.select_related('client').annotate(
+                last_msg_text=Subquery(last_message_qs.values('text')[:1]),
+                last_msg_type=Subquery(last_message_qs.values('type')[:1]),
+                last_msg_time=Subquery(last_message_qs.values('timestamp')[:1])
+            )
+            
+            for room in rooms:
+                rooms_result.append({
                     'room_id': room.id,
                     'platform': profile.platform,
                     'profile_id': profile.profile_id,
-                    'client_id': room.client.client_id,
-                    'last_message': last_msg.text if last_msg else None,
-                    'last_message_time': last_msg.timestamp.isoformat() if last_msg else None,
-                    'last_message_type': last_msg.type if last_msg else None,
+                    'client_id': room.client.name if room.client.name else room.client.client_id,
+                    'last_msg': room.last_msg_text,
+                    'timestamp': room.last_msg_time.isoformat() if room.last_msg_time else None,
+                    'type': room.last_msg_type,
                 })
 
         # Sort by latest message
-        rooms.sort(key=lambda x: x['last_message_time'] or '', reverse=True)
-        return rooms
+        rooms_result.sort(key=lambda x: x['timestamp'] or '0000-00-00', reverse=True)
+        return rooms_result
 
     @database_sync_to_async
     def get_room_messages(self, user, platform, client_id, limit=50):
@@ -341,6 +364,11 @@ class AlertConsumer(AsyncWebsocketConsumer):
             
     @database_sync_to_async
     def get_company_for_user(self, user):
+        if getattr(user, 'role', '') == 'employee':
+            try:
+                return Employee.objects.get(email=user.email).company
+            except Employee.DoesNotExist:
+                return None
         return Company.objects.filter(user=user).first()
 
 def send_alert(company, title, subtitle="", type="info"):
@@ -408,4 +436,6 @@ class TestChatConsumer(AsyncWebsocketConsumer):
     
     @database_sync_to_async
     def get_company_from_user(self, user):
+        if user.role == 'employee':
+            return Employee.objects.get(email=user.email).company
         return Company.objects.filter(user=user).first()

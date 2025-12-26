@@ -17,6 +17,7 @@ from Socials.consumers import send_alert
 from decimal import Decimal
 from .helper import *
 import logging
+from Accounts.utils import get_company_user
 
 logger = logging.getLogger(__name__)
 # Create your views here.
@@ -58,7 +59,8 @@ def create_checkout_session_for_service(request):
 @permission_classes([IsAuthenticated])
 def create_checkout_session_for_subscription(request):
     try:
-        company = Company.objects.filter(user=request.user).first()
+        target_user = get_company_user(request.user)
+        company = Company.objects.filter(user=target_user).first()
         plan_id = request.data.get("plan_id")
         auto_renew = request.data.get("auto_renew")
 
@@ -80,7 +82,8 @@ def create_checkout_session_for_subscription(request):
 @permission_classes([IsAuthenticated])
 def start_stripe_connect(request):
     """API to start Stripe Connect onboarding."""
-    company = getattr(request.user, 'company', None)
+    target_user = get_company_user(request.user)
+    company = getattr(target_user, 'company', None)
     if not company:
         return Response({"error": "Company not found for this user"}, status=404)
         
@@ -233,9 +236,9 @@ def stripe_webhook(request):
                     for admin in User.objects.filter(is_staff=True):
                         send_alert(
                             admin,
-                            "New subscription payment",
+                        "New subscription payment",
                             f"{payment.amount} USD received for {plan.get_name_display()} plan from {payment.company.user.email}",
-                            "info"
+                        "info"
                         )
                     
                     logger.info(f"✅ Subscription payment processed successfully")
@@ -277,9 +280,9 @@ def stripe_webhook(request):
                     for admin in User.objects.filter(is_staff=True):
                         send_alert(
                             admin,
-                            "Subscription payment failed",
+                        "Subscription payment failed",
                             f"{payment.amount} USD payment failed for subscription from {payment.company.user.email}",
-                            "warning"
+                        "warning"
                         )
                 else:
                     send_alert(

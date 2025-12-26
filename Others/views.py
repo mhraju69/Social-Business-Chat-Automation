@@ -1,5 +1,4 @@
 from rest_framework.response import Response
-from asgiref.sync import sync_to_async
 from rest_framework import status,permissions,generics
 from rest_framework.views import APIView 
 from rest_framework.viewsets import ModelViewSet 
@@ -21,12 +20,19 @@ import urllib.parse
 from django.shortcuts import render
 from Ai.tasks import sync_company_knowledge_task
 from Ai.data_analysis import analyze_company_data
+from Accounts.utils import get_company_user
 
 class ClientBookingView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     def post(self, request):
-        user = request.user
-        company = Company.objects.filter(user=user).first()
+        target_user = get_company_user(request.user)
+        if not target_user:
+             return Response({"error": "User has no company"}, status=400)
+             
+        company = Company.objects.filter(user=target_user).first()
+        if not company:
+            return Response({"error": "Company not found"}, status=400)
+            
         booking = create_booking(request,company.id)
         
         return Response(
@@ -158,12 +164,17 @@ class DashboardView(APIView):
     # --- Dashboard API endpoint ---
     def get(self, request, *args, **kwargs):
         timezone_name = request.query_params.get('timezone', None)
-        company = getattr(request.user, 'company', None)
+        
+        target_user = get_company_user(request.user)
+        if not target_user:
+            return Response({"error": "Company not found for this user"}, status=400)
 
-        open_chat_count = self.get_open_chats_count(request.user, minutes=10)
+        company = Company.objects.filter(user=target_user).first()
+
+        open_chat_count = self.get_open_chats_count(target_user, minutes=10)
         today_payments = self.get_today_payments(company, timezone_name) if company else {"total_amount": 0, "payments": []}
         today_meetings = self.get_today_meetings(company, timezone_name) if company else {"today_count": 0, "today_meetings": [], "remaining_count": 0}
-        chat_status = self.get_chat_channel_status(request.user)
+        chat_status = self.get_chat_channel_status(target_user)
 
         return Response({
             "open_chat": open_chat_count,
@@ -174,46 +185,6 @@ class DashboardView(APIView):
     
 class UserActivityLogView(APIView):
     permission_classes = [IsAuthenticated]
-    
-    def get(self, request):
-        user = request.user
-        activities = []
-        
-        # Models to track
-        tracked_models = [
-            {'model': 'Service', 'app': 'Accounts'},
-            {'model': 'User', 'app': 'Accounts'},
-            {'model': 'Company', 'app': 'Accounts'},
-        ]
-        
-        for tracked in tracked_models:
-            model = apps.get_model(tracked['app'], tracked['model'])
-            
-            # Get history for this user's records only
-            history_model = model.history.model
-            user_history = history_model.objects.filter(
-                history_user=user
-            ).order_by('-history_date')[:50]
-            
-            for record in user_history:
-                activity = {
-                    'id': record.history_id,
-                    'activity_type': self.get_activity_type(record),
-                    'title': self.get_activity_title(record),
-                    'description': self.get_activity_description(record),
-                    'icon': self.get_activity_icon(record),
-                    'timestamp': record.history_date,
-                    'model_name': tracked['model'],
-                    'changes': self.get_field_changes(record)  # NEW: Detailed changes
-                }
-                activities.append(activity)
-        
-        # Sort by timestamp (newest first)
-        activities.sort(key=lambda x: x['timestamp'], reverse=True)
-        
-        # Return last 20 activities
-        serializer = ActivityLogSerializer(activities[:10], many=True)
-        return Response(serializer.data)
     
     def get_activity_type(self, record):
         type_map = {
@@ -247,7 +218,7 @@ class UserActivityLogView(APIView):
         # Fields to ignore
         ignored_fields = [
             'id', 'history_id', 'history_date', 'history_change_reason',
-            'history_type', 'history_user', 'history_user_id','updated_at', 'created_at'
+            'history_type', 'history_user', 'history_user_id', 'updated_at', 'created_at'
         ]
         
         # Get all fields
@@ -276,7 +247,6 @@ class UserActivityLogView(APIView):
     
     def format_field_name(self, field_name):
         """Convert field_name to readable format"""
-        # Convert snake_case to Title Case
         return field_name.replace('_', ' ').title()
     
     def format_value(self, value):
@@ -295,19 +265,13 @@ class UserActivityLogView(APIView):
         model_name = record._meta.model.__name__.replace('Historical', '')
         
         if record.history_type == '+':
-            # For creation
             if hasattr(record, 'name'):
                 return f"'{record.name}' was created"
-            elif hasattr(record, 'question'):
-                return f"Question: '{record.question[:50]}...'"
             return f"New {model_name} created"
             
         elif record.history_type == '~':
-            # For updates - show what changed
             changes = self.get_field_changes(record)
-            
             if changes:
-                # Create a summary of changes
                 if len(changes) == 1:
                     change = changes[0]
                     return f"{change['field']} changed from '{change['old_value']}' to '{change['new_value']}'"
@@ -316,27 +280,108 @@ class UserActivityLogView(APIView):
                     if len(changes) > 3:
                         return f"Updated {', '.join(field_names)} and {len(changes) - 3} more field(s)"
                     return f"Updated {', '.join(field_names)}"
-            
             return f"{model_name} was updated"
             
         elif record.history_type == '-':
-            # For deletion
             if hasattr(record, 'name'):
                 return f"'{record.name}' was deleted"
             return f"{model_name} was removed"
     
     def get_activity_icon(self, record):
-        icon_map = {
-            '+': 'info',
-            '~': 'edit',
-            '-': 'trash'
-        }
+        icon_map = {'+': 'info', '~': 'edit', '-': 'trash'}
         return icon_map.get(record.history_type, 'info')
+
+    def get(self, request):
+        target_user = get_company_user(request.user)
+        user = target_user if target_user else request.user
+        activities = []
+        
+        tracked_models = [
+            {'model': 'Service', 'app': 'Accounts'},
+            {'model': 'User', 'app': 'Accounts'},
+            {'model': 'Company', 'app': 'Accounts'},
+        ]
+        
+        for tracked in tracked_models:
+            model = apps.get_model(tracked['app'], tracked['model'])
+            user_history = model.history.filter(history_user=user).order_by('-history_date')[:20]
+            
+            for record in user_history:
+                activities.append({
+                    'id': record.history_id,
+                    'activity_type': self.get_activity_type(record),
+                    'title': self.get_activity_title(record),
+                    'description': self.get_activity_description(record),
+                    'icon': self.get_activity_icon(record),
+                    'timestamp': record.history_date,
+                    'model_name': tracked['model'],
+                    'changes': self.get_field_changes(record)
+                })
+        
+        activities.sort(key=lambda x: x['timestamp'], reverse=True)
+        serializer = ActivityLogSerializer(activities[:10], many=True)
+        return Response(serializer.data)
+
+# ... (skipping unchanged code block) ...
+
+class FinanceDataView(APIView):
+    permission_classes = [IsAuthenticated,IsEmployeeAndCanAccessFinancialData]
+    
+    def get(self, request):
+        try:
+            target_user = get_company_user(request.user)
+            if not target_user:
+                 return Response({"error": "Company not found"}, status=404)
+            company = Company.objects.get(user=target_user)
+        except Company.DoesNotExist:
+            return Response(
+                {"error": "Company profile not found"}, 
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        data = {
+            "success_payment": Payment.success_payment_change_percentage(company),
+            "failed_payment" : Payment.get_failed_payment_counts(company),
+            "pending_payment": Payment.pending_payment_stats(company),
+            "average_order" : Payment.average_order_value_change(company)
+        }
+
+        return Response(data)
+
+# ... (skipping SupportTicketViewSet) ...
+
+
+
+# ... (skipping methods in AnalyticsView) ...
+
+class ConnectGoogleCalendarView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        target_user = get_company_user(request.user)
+        if not target_user:
+             return Response({"error": "User has no company"}, status=404)
+
+        company = Company.objects.filter(user=target_user).first()
+        method = request.data.get("from", "web")
+        if not company:
+            return Response(
+                {"error": "Company not found"},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        
+        # logic for google calendar oauth
+        auth_url = get_google_auth_url(company.id, method)
+        return Response({"auth_url": auth_url})
 
 class OpeningHoursCreateView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     def post(self, request):
-        company = Company.objects.filter(user = request.user).first()
+        target_user = get_company_user(request.user)
+        if not target_user:
+             return Response({"error": "User has no company"}, status=400)
+
+        company = Company.objects.filter(user = target_user).first()
         company_id = company.id
         days = request.data.get('days')  # e.g. ["mon", "wed", "fri"]
         start = request.data.get('start')
@@ -355,7 +400,11 @@ class OpeningHoursCreateView(APIView):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     
     def get(self, request):
-        company = Company.objects.filter(user=request.user).first()
+        target_user = get_company_user(request.user)
+        if not target_user:
+             return Response({"detail": "User has no company."}, status=status.HTTP_403_FORBIDDEN)
+             
+        company = Company.objects.filter(user=target_user).first()
         if not company:
             return Response({"detail": "You do not have an associated company."}, status=status.HTTP_403_FORBIDDEN)
 
@@ -371,8 +420,12 @@ class OpeningHoursUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
 
     def get_object(self):
         obj = super().get_object()
+        
+        target_user = get_company_user(self.request.user)
+        if not target_user:
+             raise PermissionDenied("You do not have an associated company.")
 
-        company = Company.objects.filter(user=self.request.user).first()
+        company = Company.objects.filter(user=target_user).first()
 
         if not company:
             raise PermissionDenied("You do not have an associated company.")
@@ -387,9 +440,12 @@ class UserAlertsView(APIView):
 
     def get(self, request):
         try:
-            company = Company.objects.get(user=request.user)
+            target_user = get_company_user(request.user)
+            if not target_user:
+                return Response({"error": "User has no company"}, status=400)
+            company = Company.objects.get(user=target_user)
         except Company.DoesNotExist:
-            return Response({"error": "User has no company"}, status=400)
+            return Response({"error": "Company profile not found"}, status=400)
 
         alerts = Alert.objects.filter(company=company).order_by('-time')
         serializer = AlertSerializer(alerts, many=True)
@@ -400,7 +456,11 @@ class MarkAlertReadView(APIView):
 
     def post(self, request, alert_id):
         try:
-            company = Company.objects.get(user=request.user)
+            target_user = get_company_user(request.user)
+            if not target_user:
+                 return Response({"detail": "User has no company"}, status=400)
+            company = Company.objects.get(user=target_user)
+                
             alert = Alert.objects.get(id=alert_id, company=company)
             alert.is_read = True
             alert.save()
@@ -413,10 +473,12 @@ class KnowledgeBaseListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated] 
 
     def get_queryset(self):
-        return KnowledgeBase.objects.filter(user=self.request.user)
+        target_user = get_company_user(self.request.user)
+        return KnowledgeBase.objects.filter(user=target_user)
     
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        target_user = get_company_user(self.request.user)
+        serializer.save(user=target_user)
 
 class KnowledgeBaseRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     queryset = KnowledgeBase.objects.all()
@@ -429,7 +491,10 @@ class AnalyticsView(generics.GenericAPIView):
 
     def get(self, request):
         try:
-            company = Company.objects.get(user=request.user)
+            target_user = get_company_user(request.user)
+            if not target_user:
+                return Response({"error": "Company not found for this user"}, status=400)
+            company = Company.objects.get(user=target_user)
         except Company.DoesNotExist:
             return Response(
                 {"error": "Company profile not found"}, 
@@ -678,26 +743,6 @@ class AnalyticsView(generics.GenericAPIView):
 
         return queryset
     
-class FinanceDataView(APIView):
-    permission_classes = [IsAuthenticated,IsEmployeeAndCanAccessFinancialData]
-    
-    def get(self, request):
-        try:
-            company = Company.objects.get(user=request.user)
-        except Company.DoesNotExist:
-            return Response(
-                {"error": "Company profile not found"}, 
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        data = {
-            "success_payment": Payment.success_payment_change_percentage(company),
-            "failed_payment" : Payment.get_failed_payment_counts(company),
-            "pending_payment": Payment.pending_payment_stats(company),
-            "average_order" : Payment.average_order_value_change(company)
-        }
-
-        return Response(data)
     
 class SupportTicketViewSet(ModelViewSet):
     serializer_class = SupportTicketSerializer
@@ -1210,14 +1255,18 @@ class KnowledgeCategoryView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request):
-        company = Company.objects.filter(user=request.user).first()
-        if not company:
+        target_user = get_company_user(request.user)
+        if not target_user:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
-        
+            
+        company = Company.objects.filter(user=target_user).first()
+        if not company:
+            return Response({"error": "Company profile not found"}, status=status.HTTP_404_NOT_FOUND)
+            
         return Response({
             "heath" : analyze_company_data(company.id),
             "opening_hours": OpeningHours.objects.filter(company=company).count(),
-            "knowledge_base": KnowledgeBase.objects.filter(user=request.user).count(),
+            "knowledge_base": KnowledgeBase.objects.filter(user=target_user).count(),
             "services": Service.objects.filter(company=company).count(),
         })
 
@@ -1226,9 +1275,13 @@ class SyncKnowledgeView(APIView):
 
     def post(self, request):
         try:
-            company = Company.objects.filter(user=request.user).first()
+            target_user = get_company_user(request.user)
+            if not target_user:
+                return Response({'error': 'Company user not resolved'}, status=status.HTTP_404_NOT_FOUND)
+                
+            company = Company.objects.filter(user=target_user).first()
             if not company:
-                return Response({'error': 'Company not found'}, status=status.HTTP_404_NOT_FOUND)
+                return Response({'error': 'Company profile not found'}, status=status.HTTP_404_NOT_FOUND)
             
             # Start the Celery task
             sync_company_knowledge_task.delay(company.id)

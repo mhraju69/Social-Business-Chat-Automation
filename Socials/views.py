@@ -16,6 +16,7 @@ from rest_framework.exceptions import NotFound
 from django.db.models import Count
 from django.db.models.functions import Lower
 from Accounts.models import *
+from Accounts.utils import get_company_user
 # Create your views here.
 
 def Connect(request):
@@ -31,7 +32,8 @@ class FacebookConnectView(APIView):
         # ✅ Added pages_messaging permission
         scope = "pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging"
         # state = 1
-        state = request.user.id
+        target_user = get_company_user(request.user)
+        state = target_user.id if target_user else request.user.id
 
         fb_login_url = (
             f"https://www.facebook.com/v20.0/dialog/oauth"
@@ -186,7 +188,8 @@ class InstagramConnectView(APIView):
         fb_app_id = settings.FB_APP_ID
         redirect_uri = "https://ape-in-eft.ngrok-free.app/instagram/callback/"
         scope = "instagram_basic,instagram_manage_messages,pages_show_list,pages_manage_metadata"
-        state = request.user.id 
+        target_user = get_company_user(request.user)
+        state = target_user.id if target_user else request.user.id 
 
         fb_login_url = (
             f"https://www.facebook.com/v20.0/dialog/oauth"
@@ -322,14 +325,9 @@ class ChatProfileView(RetrieveUpdateAPIView):
     def get_object(self):
         platform = self.request.query_params.get("platform") or self.request.data.get("platform") or "facebook"
         
-        target_user = self.request.user
-        
-        # If employee, switch target_user to the company owner
-        if getattr(self.request.user, 'role', '') == 'employee':
-            # Employee linked via email
-            employee = Employee.objects.filter(email__iexact=self.request.user.email).first()
-            if employee and employee.company:
-                target_user = employee.company.user
+        target_user = get_company_user(self.request.user)
+        if not target_user:
+             raise NotFound("Company user not found.")
         
         try:
             return ChatProfile.objects.get(user=target_user, platform=platform)
@@ -338,13 +336,14 @@ class ChatProfileView(RetrieveUpdateAPIView):
  
 class CommonAskedLeaderboard(APIView):
     def get(self, request):
-        company = Company.objects.filter(user=request.user).first()
+        target_user = get_company_user(request.user)
+        company = Company.objects.filter(user=target_user).first()
 
         if not company:
             return Response({"error": "Company not found"}, status=404)
 
         data = ChatMessage.objects.filter(
-            room__profile__user=request.user,
+            room__profile__user=target_user,
             type='incoming'
         ).values('text').annotate(
             count=Count('id')
@@ -355,8 +354,8 @@ class CommonAskedLeaderboard(APIView):
 class GetOldMessage(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request,room_id,platform):
-        user = request.user
-        if not ChatRoom.objects.filter(id=room_id,profile__user=user,profile__platform=platform).exists():
+        target_user = get_company_user(request.user)
+        if not ChatRoom.objects.filter(id=room_id,profile__user=target_user,profile__platform=platform).exists():
             return Response({"error": "Room not found"}, status=404)
             
 
