@@ -18,7 +18,7 @@ from rest_framework import serializers
 from .serializers import AdminTeamMemberSerializer, ChannelOverviewSerializer, SimpleUserSerializer, AdminCompanySerializer
 from rest_framework.pagination import PageNumberPagination
 from datetime import timedelta
-from .utils import get_today
+from .utils import get_today, percentage_change
 class DashboardView(generics.GenericAPIView):
     permission_classes = [IsAdmin]
 
@@ -433,9 +433,9 @@ class PerformanceAnalyticsAPIView(generics.GenericAPIView):
         monthly_revenue_prev = Payment.objects.filter(created_at__gte=previous_date, created_at__lt=data_date_start_date).aggregate(total=Sum('amount'))['total'] or 0
 
         # difference percentage calculation
-        message_sent_diff = ((total_message_sent - message_sent_prev) / message_sent_prev * 100) if message_sent_prev > 0 else 0
-        message_received_diff = ((total_message_received - message_received_prev) / message_received_prev * 100) if message_received_prev > 0 else 0
-        monthly_revenue_diff = ((monthly_revenue - monthly_revenue_prev) / monthly_revenue_prev * 100) if monthly_revenue_prev > 0 else 0
+        message_sent_diff = percentage_change(total_message_sent, message_sent_prev)
+        message_received_diff = percentage_change(total_message_received, message_received_prev)
+        monthly_revenue_diff = percentage_change(monthly_revenue, monthly_revenue_prev)
 
 
         data = {
