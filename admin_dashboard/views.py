@@ -19,6 +19,9 @@ from .serializers import AdminTeamMemberSerializer, ChannelOverviewSerializer, S
 from rest_framework.pagination import PageNumberPagination
 from datetime import timedelta
 from .utils import get_today, percentage_change
+from django.conf import settings
+from django.core.mail import send_mail
+from .models import AdminActivity
 class DashboardView(generics.GenericAPIView):
     permission_classes = [IsAdmin]
 
@@ -307,6 +310,8 @@ class RejectChannelsView(APIView):
         if chat_profile_id:
             try:
                 profile = ChatProfile.objects.get(id=chat_profile_id)
+                if profile.is_approved:
+                    return Response({"error": f"Chat profile {chat_profile_id} is already approved and cannot be rejected."}, status=400)
                 profile.delete()
                 return Response({"status": f"Chat profile {chat_profile_id} rejected."})
             
@@ -404,8 +409,11 @@ class PerformanceAnalyticsAPIView(generics.GenericAPIView):
 
         time_scope = request.query_params.get('time_scope', 'last_month') # today / last_month / last_year
         timezone_name = request.query_params.get('timezone', 'UTC')
-        today_start, today_end = get_today(user=request.user if timezone_name is None else  None, timezone_name=timezone_name)
-
+        try:
+            today_start, today_end = get_today(user=request.user if timezone_name is None else  None, timezone_name=timezone_name)
+        except Exception as e:
+            return Response({"error": f"Invalid timezone: {timezone_name}"}, status=400)
+        
         if time_scope == 'today':
             data_date_start_date = today_start
         elif time_scope == 'last_month':
@@ -500,3 +508,60 @@ class CompanyOverviewListView(generics.GenericAPIView):
             "companies": serializer.data
         }
         return Response(data)
+
+
+class CreateAdminTeamMemberView(generics.GenericAPIView):
+    permission_classes = [IsAdmin]
+
+    @extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Create a new admin team member",
+        request=inline_serializer(
+            name="CreateAdminTeamMemberRequest",
+            fields={
+                "email": serializers.EmailField()
+            }
+        ),
+        responses={
+            201: {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string"},
+                },
+            },
+            400: {
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string"},
+                },
+            },
+        }
+    )
+    def post(self, request, *args, **kwargs):
+
+        email = request.data.get('email')
+        if not email:
+            return Response({"error": "Email is required."}, status=400)
+        if User.objects.filter(email=email).exists():
+            return Response({"error": "User with this email already exists."}, status=400)
+        import random
+        password = ''.join(random.choices('abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', k=10))
+        new_admin = User.objects.create_superuser(email=email, password=password, role='admin', is_active=True)
+        
+        AdminActivity.objects.get_or_create(user=new_admin)
+
+        current_admin_activity = AdminActivity.objects.get_or_create(user=request.user)[0]
+        current_admin_activity.new_user_added += 1
+        current_admin_activity.save()
+        
+        url = request.META.get('HTTP_ORIGIN', 'http://localhost:8000')
+
+
+        send_mail(
+            'Admin Account Created',
+            f'An admin account has been created for you.\n\nEmail: {email}\nPassword: {password}\n\nPlease log in and change your password. Login here: {url}/login',
+            settings.DEFAULT_FROM_EMAIL,
+            [email],
+            fail_silently=False,
+        )
+        return Response({"message": "Admin user created successfully."}, status=201)
