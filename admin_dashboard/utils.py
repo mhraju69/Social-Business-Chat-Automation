@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from django.utils import timezone
 
 
-def get_today(self, user=None, timezone_name=None):
+def get_today(user=None, timezone_name=None):
     tz_name = timezone_name or getattr(user, 'timezone', 'UTC')
     company_tz = pytz.timezone(tz_name)
 

@@ -403,8 +403,8 @@ class PerformanceAnalyticsAPIView(generics.GenericAPIView):
     def get(self, request, *args, **kwargs):
 
         time_scope = request.query_params.get('time_scope', 'last_month') # today / last_month / last_year
-
-        today_start, today_end = get_today()
+        timezone_name = request.query_params.get('timezone', 'UTC')
+        today_start, today_end = get_today(user=request.user if timezone_name is None else  None, timezone_name=timezone_name)
 
         if time_scope == 'today':
             data_date_start_date = today_start
