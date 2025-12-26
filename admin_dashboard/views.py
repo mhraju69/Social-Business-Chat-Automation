@@ -307,6 +307,8 @@ class RejectChannelsView(APIView):
         if chat_profile_id:
             try:
                 profile = ChatProfile.objects.get(id=chat_profile_id)
+                if profile.is_approved:
+                    return Response({"error": f"Chat profile {chat_profile_id} is already approved and cannot be rejected."}, status=400)
                 profile.delete()
                 return Response({"status": f"Chat profile {chat_profile_id} rejected."})
             
