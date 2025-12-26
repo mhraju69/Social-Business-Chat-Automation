@@ -17,4 +17,11 @@ def get_today(user=None, timezone_name=None):
     end_utc = end_of_day.astimezone(pytz.UTC)
 
     return start_utc, end_utc
-    
+
+def percentage_change(current, previous):
+    if previous == 0:
+        if current == 0:
+            return 0
+        return 100  # or None / "New"
+    return ((current - previous) / previous) * 100
+
