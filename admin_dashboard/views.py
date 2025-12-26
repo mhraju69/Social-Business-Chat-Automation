@@ -5,7 +5,7 @@ from rest_framework import permissions
 from rest_framework import generics
 from Accounts.models import User, Company
 from Finance import models
-from Socials.models import ChatProfile
+from Socials.models import ChatProfile, ChatMessage
 from Finance.models import Payment
 from Others.models import SupportTicket
 from django.db.models import Sum, Q
@@ -17,6 +17,8 @@ from drf_spectacular.utils import extend_schema_view, extend_schema, inline_seri
 from rest_framework import serializers
 from .serializers import AdminTeamMemberSerializer, ChannelOverviewSerializer, SimpleUserSerializer, AdminCompanySerializer
 from rest_framework.pagination import PageNumberPagination
+from datetime import timedelta
+
 class DashboardView(generics.GenericAPIView):
     permission_classes = [IsAdmin]
 
@@ -67,7 +69,7 @@ class DashboardView(generics.GenericAPIView):
 
         tickets = SupportTicket.objects.filter(
             Q(status='open') | Q(status='in_progress')
-        )
+        )[:5]
 
         # Show chart data for last 6 months
         chart_data = []
@@ -377,6 +379,7 @@ class CompanyListView(generics.ListAPIView):
                 queryset = queryset.filter(user__is_active=True)
             elif is_active.lower() == 'false':
                 queryset = queryset.filter(user__is_active=False)
+        queryset = queryset.exclude(name='').order_by('name')
         return queryset
 
 class PerformanceAnalyticsAPIView(generics.GenericAPIView):
@@ -399,35 +402,54 @@ class PerformanceAnalyticsAPIView(generics.GenericAPIView):
     )
     def get(self, request, *args, **kwargs):
 
-        time_scope = request.query_params.get('time_scope', 'monthly')
+        time_scope = request.query_params.get('time_scope', 'last_month') # today / last_month / last_year
 
-        # need to implement actual calculations based on time_scope
+        today = datetime.date.today()
 
-        total_message_sent = 0
-        total_message_received = 0
-        monthly_revenue = 0
+        if time_scope == 'today':
+            data_date_start_date = today
+        elif time_scope == 'last_month':
+            data_date_start_date = today - timedelta(days=30)
+        elif time_scope == 'last_year':
+            data_date_start_date = today - timedelta(days=365)
+        else:
+            return Response({"error": "Invalid time_scope parameter. Use 'today', 'last_month', or 'last_year'."}, status=400)
+
+        total_message_sent = ChatMessage.objects.filter(type='outgoing', created_at__gte=data_date_start_date).count()
+        total_message_received = ChatMessage.objects.filter(type='incoming', created_at__gte=data_date_start_date).count()
+        monthly_revenue = Payment.objects.filter(created_at__gte=data_date_start_date).aggregate(total=Sum('amount'))['total'] or 0
         total_revenue = Payment.objects.aggregate(total=Sum('amount'))['total'] or 0
 
+        if time_scope == 'today':
+            previous_date = today - timedelta(days=1)
+        elif time_scope == 'last_month':
+            previous_date = today - timedelta(days=60)
+        elif time_scope == 'last_year':
+            previous_date = today - timedelta(days=730)
 
         # previous month data
-        message_sent_prev = 0
-        message_received_prev = 0
-        monthly_revenue_prev = 0
+        message_sent_prev = ChatMessage.objects.filter(type='outgoing', created_at__gte=previous_date, created_at__lt=data_date_start_date).count()
+        message_received_prev = ChatMessage.objects.filter(type='incoming', created_at__gte=previous_date, created_at__lt=data_date_start_date).count()
+        monthly_revenue_prev = Payment.objects.filter(created_at__gte=previous_date, created_at__lt=data_date_start_date).aggregate(total=Sum('amount'))['total'] or 0
 
+        # difference percentage calculation
+        message_sent_diff = ((total_message_sent - message_sent_prev) / message_sent_prev * 100) if message_sent_prev > 0 else 0
+        message_received_diff = ((total_message_received - message_received_prev) / message_received_prev * 100) if message_received_prev > 0 else 0
+        monthly_revenue_diff = ((monthly_revenue - monthly_revenue_prev) / monthly_revenue_prev * 100) if monthly_revenue_prev > 0 else 0
 
 
         data = {
             "total_message_sent": {
                 "current": total_message_sent,
-                "previous": message_sent_prev
+                "previous": message_sent_diff
             },
             "total_message_received": {
                 "current": total_message_received,
-                "previous": message_received_prev
+                "previous": message_received_diff
             },
             "monthly_revenue": {
                 "current": monthly_revenue,
-                "previous": monthly_revenue_prev
+                "previous": monthly_revenue_diff
             },
             "total_revenue": total_revenue,
             "time_scope": time_scope,
