@@ -16,4 +16,5 @@ urlpatterns = [
     path('company-overview/', views.CompanyOverviewListView.as_view(), name='company-overview'),
 
     path('performance-analytics/', views.PerformanceAnalyticsAPIView.as_view(), name='performance-analytics'),
+    path('subscription-plan/', views.SubscriptionPlanListView.as_view(), name='subscription-plan-list'),
 ]
