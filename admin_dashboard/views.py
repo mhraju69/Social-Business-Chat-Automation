@@ -4,9 +4,10 @@ from rest_framework.response import Response
 from rest_framework import permissions
 from rest_framework import generics
 from Accounts.models import User, Company
-from Finance import models
+from Finance.models import Plan, Subscriptions
+from django.db import models
 from Socials.models import ChatProfile, ChatMessage
-from Finance.models import Payment
+from Finance.models import Payment, Plan
 from Others.models import SupportTicket
 from django.db.models import Sum, Q
 from Others.serializers import SupportTicketSerializer
@@ -22,6 +23,8 @@ from .utils import get_today, percentage_change
 from django.conf import settings
 from django.core.mail import send_mail
 from .models import AdminActivity
+from Finance.serializers import SubscriptionSerializer, PlanSerializers
+
 class DashboardView(generics.GenericAPIView):
     permission_classes = [IsAdmin]
 
@@ -440,29 +443,37 @@ class PerformanceAnalyticsAPIView(generics.GenericAPIView):
         message_received_prev = ChatMessage.objects.filter(type='incoming', created_at__gte=previous_date, created_at__lt=data_date_start_date).count()
         monthly_revenue_prev = Payment.objects.filter(created_at__gte=previous_date, created_at__lt=data_date_start_date).aggregate(total=Sum('amount'))['total'] or 0
 
-        # difference percentage calculation
-        message_sent_diff = percentage_change(total_message_sent, message_sent_prev)
-        message_received_diff = percentage_change(total_message_received, message_received_prev)
-        monthly_revenue_diff = percentage_change(monthly_revenue, monthly_revenue_prev)
-
-
         data = {
             "total_message_sent": {
                 "current": total_message_sent,
-                "previous": message_sent_diff
+                "previous": message_sent_prev
             },
             "total_message_received": {
                 "current": total_message_received,
-                "previous": message_received_diff
+                "previous": message_received_prev
             },
             "monthly_revenue": {
                 "current": monthly_revenue,
-                "previous": monthly_revenue_diff
+                "previous": monthly_revenue_prev
             },
             "total_revenue": total_revenue,
             "time_scope": time_scope,
         }
         return Response(data)
+
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Get list of subscriptions with pagination",
+    )
+)
+class SubscriptionPlanListView(generics.ListAPIView):
+    queryset = Plan.objects.exclude(custom=True)
+    serializer_class = PlanSerializers
+    permission_classes = [IsAdmin]
+
+
 
 @extend_schema_view(
     get=extend_schema(
@@ -565,3 +576,4 @@ class CreateAdminTeamMemberView(generics.GenericAPIView):
             fail_silently=False,
         )
         return Response({"message": "Admin user created successfully."}, status=201)
+        
