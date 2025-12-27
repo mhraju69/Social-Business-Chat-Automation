@@ -11,7 +11,7 @@ class PaymentSerializer(serializers.ModelSerializer):
 class PlanSerializers(serializers.ModelSerializer):
     class Meta:
         model = Plan
-        fields = ['id','name', 'duration', 'price','msg_limit','user_limit','token_limit']
+        fields = ['id','name', 'duration', 'price','msg_limit','user_limit','token_limit', 'custom']
         
 class SubscriptionSerializer(serializers.ModelSerializer):
     plan_name = serializers.CharField(source='plan.get_name_display', read_only=True)

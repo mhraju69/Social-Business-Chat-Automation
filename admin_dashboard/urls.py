@@ -18,4 +18,5 @@ urlpatterns = [
     path('performance-analytics/', views.PerformanceAnalyticsAPIView.as_view(), name='performance-analytics'),
     path('subscription-plan/', views.SubscriptionPlanListView.as_view(), name='subscription-plan-list'),
     path('subscription-plan/<int:id>/', views.SubscriptionPlanUpdateView.as_view(), name='subscription-plan-detail'),
+    path('create-custom-plan/', views.CreateCustomPlanView.as_view(), name='create-custom-plan'),
 ]
