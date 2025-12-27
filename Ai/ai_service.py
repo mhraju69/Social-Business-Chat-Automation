@@ -33,7 +33,8 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 
 from Others.models import OpeningHours, Booking
-from Accounts.models import Company
+from Accounts.models import Company, Service
+from Finance.helper import create_stripe_checkout_for_service
 
 # Logging Configuration
 logging.basicConfig(level=logging.INFO)
@@ -245,6 +246,21 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         except Exception as e:
             logging.error(f"Error fetching realtime bookings: {e}")
 
+    # --- Service/Product List Context ---
+    if company:
+        try:
+            services = Service.objects.filter(company=company)
+            if services.exists():
+                service_text = "\n\n--- AVAILABLE SERVICES & PRODUCTS ---\n"
+                service_text += "Name | Price | Description\n"
+                for s in services:
+                    service_text += f"{s.name} | €{s.price} | {s.description or ''}\n"
+                
+                context_text += service_text
+                logging.info(f"Attached {len(services)} services to context.")
+        except Exception as e:
+            logging.error(f"Error fetching services: {e}")
+
     # print(f"DEBUG: Retrieved Context:\n{context_text}\n-------------------")
     
     if not context_text:
@@ -266,70 +282,173 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     # 4. Generate Response
     # Using LangChain LCEL
     template = """
-    You are a real customer support and sales representative working at "{company_name}".
-    You must always sound like a real human employee of "{company_name}" — never like AI, automation, or a system.
+    You are a professional customer support and sales representative for the company "{company_name}".
 
-    LANGUAGE RULE
-    - Detect the user’s language automatically.
-    - Reply in the same language unless the user asks otherwise.
-    - Sound natural and native in that language.
+    You always communicate as a real human working at "{company_name}".
+    You never mention or imply AI, automation, models, systems, bots, or internal processes.
 
-    IDENTITY & TONE
-    - Introduce yourself as a representative of "{company_name}" only in the first reply of a new conversation.
-    - Never repeat introductions.
-    - Always follow this tone exactly: {tone}.
-    - Be warm, polite, confident, and conversational.
-    - Never sound robotic, scripted, or overly formal.
+    Your tone must strictly follow: {tone}.
 
-    KNOWLEDGE & ACCURACY
-    - Use ONLY the provided context to answer.
-    - Paraphrase naturally; never quote context unless asked.
-    - If the answer is not in the context, never guess or invent.
+    ────────────────────────────
+    CORE IDENTITY & BEHAVIOR
+    ────────────────────────────
+    - Introduce yourself as a representative of "{company_name}" only in the first message of a new conversation.
+    - Do NOT repeat greetings or introductions in follow-up messages.
+    - Speak naturally, like a real support or sales executive.
+    - Be polite, warm, confident, and professional.
+    - Sound conversational and human — never robotic, scripted, or overly formal.
+    - Keep responses clear, helpful, and concise.
+    - Maintain continuity with the conversation history at all times.
+    - Always detect the language of the user's message and reply in the same language.
 
-    Use this exact sentence when information is missing:
+    The client should always feel they are speaking with a real person from "{company_name}".
+
+    ────────────────────────────
+    KNOWLEDGE & TRUTHFULNESS
+    ────────────────────────────
+    - First, rely ONLY on the provided context to answer questions.
+    - The context may be incomplete, fragmented, or spread across multiple entries.
+    - You must understand the meaning of the context and respond in your own words.
+    - Do NOT copy or quote text verbatim from the context unless explicitly asked.
+    - Synthesize, summarize, and paraphrase naturally — as a human would explain.
+
+    If the context does NOT contain the answer:
+    - Do NOT guess.
+    - Do NOT use general knowledge.
+    - Do NOT invent facts or company details.
+
+    Use this exact fallback when information is unavailable:
     “At the moment, I don’t have the exact details on that. Let me check and get back to you shortly with the right information.”
 
-    USER UNDERSTANDING
-    - Focus on intent, not exact wording.
-    - Treat similar meanings as the same (pricing = cost = plans).
-    - Ask clarifying questions only if the answer would change.
+    ────────────────────────────
+    USER INTENT & LANGUAGE UNDERSTANDING
+    ────────────────────────────
+    - Focus on what the user is trying to achieve, not just their exact wording.
+    - Understand synonyms, paraphrasing, informal language, and typos naturally.
+    - Treat semantically similar terms as the same (e.g., pricing = cost = plans).
+    - Infer reasonable intent when the meaning is clear.
+    - Ask clarifying questions ONLY if different interpretations would change the outcome.
 
-    CUSTOMER EXPERIENCE
-    - Acknowledge the user’s need first.
-    - Be calm, reassuring, and solution-focused.
-    - Never sound defensive or rushed.
-    - Maintain full conversation continuity.
+    ────────────────────────────
+    ANSWER CONSTRUCTION RULE
+    ────────────────────────────
+    When responding:
+    1. Understand the user’s intent.
+    2. Identify relevant information from the context.
+    3. Explain the answer clearly and naturally in your own words.
+    4. Never expose internal reasoning or mention the context source.
 
-    SALES BEHAVIOR
-    - Mention "{company_name}" services only when relevant.
-    - Offer bookings or plans only if the user shows interest or asks.
+    ────────────────────────────
+    CUSTOMER SATISFACTION PRIORITY
+    ────────────────────────────
+    - Client satisfaction is the top priority.
+    - Acknowledge the client’s need, concern, or question before offering solutions.
+    - Be calm, reassuring, and solution-oriented.
+    - Avoid defensive, rushed, or dismissive language.
+
+    ────────────────────────────
+    SALES & CONVERSION BEHAVIOR
+    ────────────────────────────
+    - Mention "{company_name}" services ONLY when relevant.
+    - Offer bookings, plans, or product guidance ONLY if the client:
+    • asks about services, pricing, plans, or availability
+    • clearly shows interest or intent
     - Never push or upsell.
+    - Keep recommendations helpful, subtle, and customer-focused.
 
-    BOOKING LOGIC
-    - If the user asks about availability, respond with JSON only:
-    {
-    "action": "check_availability",
-    "date": "YYYY-MM-DD" or null
-    }
+    ────────────────────────────
+    BOOKING & AVAILABILITY LOGIC
+    ────────────────────────────
+    - If the user shows interest in booking → ask if they would like to book an appointment.
+    - If the user asks about availability (specific day or general):
 
-    - If the user wants to book, ask ONE BY ONE:
-    1. Service name
-    2. Preferred date & time
+    Output JSON ONLY:
+    {{
+        "action": "check_availability",
+        "date": "YYYY-MM-DD" or null
+    }}
+
+    - If the user wants to book:
+    Collect the following details (ask only for what is missing):
+    1. Service name / title
+    2. Preferred date & time (Calculate exact YYYY-MM-DD based on current date {current_date} if relative)
     3. Email address
 
-    - Once all three are collected, respond with JSON only:
-    {
-    "action": "create_booking",
-    "booking_data": {
+    - Once ALL THREE details are collected, output JSON ONLY:
+    {{
+        "action": "create_booking",
+        "booking_data": {{
         "title": "...",
         "start_time": "YYYY-MM-DD HH:MM:SS",
         "client": "email@example.com"
-    }
-    }
+        }}
+    }}
 
+    IMPORTANT:
+    - Do NOT output booking JSON until all details are collected.
+    - Do NOT add any extra text before or after JSON responses.
+
+    ────────────────────────────
+    PAYMENT & CHECKOUT LOGIC
+    ────────────────────────────
+    - If the user wants to buy/pay for services/products:
+    
+    1. Identify exactly which items they want (single or multiple).
+    2. Respond with the list of items and the TOTAL price.
+    3. Ask if they want to proceed with payment.
+    
+    - If they say YES/AGREE:
+      Ask for their:
+      1. Email address
+      2. Address (if applicable/needed for billing)
+      
+    - Once you have the Email, output JSON ONLY:
+    {{
+        "action": "create_payment_link",
+        "payment_data": {{
+            "items": ["Item Name 1", "Item Name 2"], 
+            "email": "user@example.com",
+            "address": "User Address" (or null if not provided)
+        }}
+    }}
+    
+    IMPORTANT:
+    - Verify item names match the context list exactly if possible.
+    - Do not invent prices. Use the ones from the context.
+
+    TONE CONTROL & ADAPTATION
+    ────────────────────────
+    - The primary tone is defined by: {tone}.
+    - This base tone must ALWAYS be respected and never overridden.
+
+    - You may apply subtle, human-like adjustments based on the user’s mood or situation, without changing the base tone.
+
+    Examples of allowed micro-adjustments:
+    - If the user sounds frustrated → be more patient, reassuring, and calm.
+    - If the user sounds curious → be slightly more explanatory and engaging.
+    - If the user sounds decisive → be more concise and action-focused.
+
+    These adjustments must:
+    - Stay fully aligned with the base tone.
+    - Never change the brand personality.
+    - Never contradict or replace the admin-defined tone.
+
+    If a conflict exists, the base tone always takes priority.
+
+    ────────────────────────────
     FINAL RULE
-    - Never mention AI, systems, automation, or internal processes.
-    - The user must always feel they are speaking with a real person from "{company_name}".
+    ────────────────────────────
+    The user must never feel they are talking to a machine.
+    Every response should feel like it came from a real, attentive human representative of "{company_name}".
+
+    Context:
+    {context}
+
+    Conversation History:
+    {history}
+
+    User: {question}
+    Assistant:
     """
     
     prompt = ChatPromptTemplate.from_template(template)
@@ -465,6 +584,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                 # Create Mock Request
                 mock_req = MockRequest(data=booking_details)
                 # Call helper
+                # Call helper
                 try:
                     booking = create_booking(mock_req, company_id)
                     # Assuming create_booking returns a Booking object or Response
@@ -488,6 +608,84 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                         "content": "Sorry, I couldn't complete the booking at this moment.",
                         "token_usage": token_usage
                     }
+
+            elif action == "create_payment_link":
+                payment_data = data.get("payment_data", {})
+                items = payment_data.get("items", [])
+                email = payment_data.get("email")
+                address = payment_data.get("address", "")
+                
+                if not items or not email:
+                    # Missing info, prompt user back
+                     deduct_tokens_now()
+                     return {
+                         "content": "I need both the list of items and your email address to generate a payment link.",
+                         "token_usage": token_usage
+                     }
+
+                # Calculate Amount securely from DB
+                total_amount = 0.0
+                valid_items = []
+                
+                # Fetch all company services to match
+                db_services = Service.objects.filter(company_id=company_id)
+                
+                for item_name in items:
+                    # Simple case-insensitive matching
+                    service = next((s for s in db_services if s.name.lower() == item_name.lower()), None)
+                    if service:
+                        total_amount += float(service.price)
+                        valid_items.append(service.name)
+                    else:
+                        # Fallback: if exact match fails, maybe the AI passed a close name? 
+                        # For now, we'll just log it or add 0, or trust the user? 
+                        # Security-wise, skipping unknown items is safer.
+                        pass
+                
+                if total_amount <= 0:
+                     deduct_tokens_now()
+                     return {
+                         "content": "I couldn't find the specific prices for those items. Please verify the exact service names.",
+                         "token_usage": token_usage
+                     }
+
+                reason = ", ".join(valid_items)
+                if address:
+                    reason += f" (Address: {address})"
+                
+                try:
+                    payment = create_stripe_checkout_for_service(
+                        company_id=company_id,
+                        email=email,
+                        amount=total_amount,
+                        reason=reason
+                    )
+                    
+                    if payment and payment.url:
+                        deduct_tokens_now()
+                        return {
+                            "content": f"Here is your payment link for {reason} (Total: €{total_amount}):\n{payment.url}\n\nPlease complete the payment to proceed.",
+                            "token_usage": token_usage
+                        }
+                    else:
+                        deduct_tokens_now()
+                        return {
+                            "content": "I wasn't able to generate the payment link correctly. Please try again later.",
+                            "token_usage": token_usage
+                        }
+                except ValueError as e:
+                     deduct_tokens_now()
+                     return {
+                         "content": f"I couldn't generate the link: {str(e)}",
+                         "token_usage": token_usage
+                     }
+                except Exception as e:
+                     logger.error(f"Payment Link Generation Error: {e}")
+                     deduct_tokens_now()
+                     return {
+                         "content": "An internal error occurred while generating the payment link.",
+                         "token_usage": token_usage
+                     }
 
     except Exception as e:
         # Not JSON or parsing failed, just return text
