@@ -119,6 +119,17 @@ class Subscriptions(models.Model):
     def __str__(self):
         return f"{self.company} - {self.plan.name}"
 
+class DailyUsage(models.Model):
+    company = models.ForeignKey(Company, on_delete=models.CASCADE, related_name='daily_usage')
+    date = models.DateField(default=timezone.now)
+    msg_count = models.IntegerField(default=0)
+
+    class Meta:
+        unique_together = ('company', 'date')
+
+    def __str__(self):
+        return f"{self.company} - {self.date} - {self.msg_count}"
+
     
 class Payment(models.Model):
     TYPE = [("subscriptions","Subscriptions"),("services","Services")]

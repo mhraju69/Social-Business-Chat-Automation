@@ -454,6 +454,12 @@ class TestChatConsumer(AsyncWebsocketConsumer):
 
     async def get_ai_response(self, user_message):
         from asgiref.sync import sync_to_async
+        from Socials.helper import check_msg_limit
+
+        # Check Daily Message Limit
+        if not await sync_to_async(check_msg_limit)(self.company.id):
+            return {"content": "Daily AI response limit reached. Bot has been deactivated."}
+
         response = await sync_to_async(get_ai_response)(self.company.id, user_message, tone="friendly")
         return response
     

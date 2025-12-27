@@ -215,6 +215,12 @@ def stripe_webhook(request):
                         payment_date=timezone.now(),
                         invoice_url=invoice.get('hosted_invoice_url')
                     )
+                    send_alert(
+                        [sub_obj.company],
+                        "Subscription Renewed",
+                        "Your subscription has been renewed.",
+                        "info"
+                        )
                     logger.info(f"🔄 Subscription {subscription_id} renewed via invoice.paid")
             except Subscriptions.DoesNotExist:
                 logger.warning(f"Invoice paid for unknown subscription: {subscription_id}")
@@ -228,6 +234,12 @@ def stripe_webhook(request):
             sub_obj = Subscriptions.objects.get(stripe_subscription_id=subscription_id)
             sub_obj.active = False
             sub_obj.save()
+            send_alert(
+                [sub_obj.company],
+                "Subscription Cancelled/Expired",
+                "Your subscription has been cancelled/Expired.",
+                "info"
+                )
             logger.info(f"🚫 Subscription {subscription_id} deactivated (cancelled/expired)")
         except Subscriptions.DoesNotExist:
             pass
@@ -252,7 +264,7 @@ class CheckPlan(APIView):
     def get(self, request):
         company = getattr(request.user, 'company', None)
 
-        paln = Subscriptions.objects.filter(company=company,active=True)
+        paln = Subscriptions.objects.filter(company=company,active=True).select_related('plan','company')
         
         return Response(SubscriptionSerializer(paln,many=True).data)
 

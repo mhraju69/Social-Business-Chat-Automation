@@ -7,7 +7,8 @@ from django.core.cache import cache
 from django_redis import get_redis_connection
 from Others.models import Alert
 from Accounts.models import Company
-from Finance.models import Subscriptions
+from Finance.models import Subscriptions, DailyUsage
+from .models import ChatProfile, ChatRoom, ChatMessage, ChatClient
 
 def send_message(profile: ChatProfile, client_obj: ChatClient, message_text):
     try:
@@ -111,3 +112,74 @@ def check_token_count(company_id, count):
     except Exception as e:
         print(f"❌ Error in check_token_count: {e}")
         return False
+
+def check_msg_limit(company_id):
+    """
+    Check if the company has reached its daily AI response limit.
+    If limit reached, deactivate chat profiles and send alert.
+    """
+    try:
+        # 1. Fetch active subscription and plan
+        subscription = Subscriptions.objects.filter(
+            company__id=company_id, 
+            active=True,
+            end__gt=timezone.now()
+        ).select_related('plan').first()
+
+        if not subscription or not subscription.plan:
+            print(f"⚠️ No active subscription or plan found for Company {company_id}")
+            return False
+
+        plan = subscription.plan
+        msg_limit = plan.msg_limit
+
+        # 2. Get or create daily usage record
+        today = timezone.now().date()
+        usage, created = DailyUsage.objects.get_or_create(
+            company_id=company_id,
+            date=today,
+            defaults={'msg_count': 0}
+        )
+
+        # 3. Check if limit is already reached
+        if usage.msg_count >= msg_limit:
+            # Action: Deactivate & Alert (if not already done, but we'll do it safely)
+            deactivate_and_alert_limit(company_id, "Daily Message Limit Reached")
+            return False
+
+        # 4. Increment count
+        usage.msg_count += 1
+        usage.save(update_fields=['msg_count'])
+
+        # 5. Check if THIS message hits the limit
+        if usage.msg_count >= msg_limit:
+            deactivate_and_alert_limit(company_id, "Daily Message Limit Reached")
+
+        return True
+
+    except Exception as e:
+        print(f"❌ Error in check_msg_limit: {e}")
+        return False
+
+def deactivate_and_alert_limit(company_id, reason):
+    """
+    Deactivates bot for all chat profiles and sends a real-time alert.
+    """
+    try:
+        company = Company.objects.get(id=company_id)
+        
+        # Deactivate Chat Profiles
+        updated_count = ChatProfile.objects.filter(user=company.user).update(bot_active=False)
+        
+        if updated_count > 0:
+            # Send alert only if we actually deactivated something or as a reminder
+            from .consumers import send_alert
+            send_alert(
+                company, 
+                reason, 
+                f"Your AI response limit ({reason}) has been reached. Chat profiles are now inactive.", 
+                type="error"
+            )
+            print(f"⚠️ Limit reached for Company {company_id}. Profiles deactivated: {updated_count}")
+    except Exception as e:
+        print(f"Error in deactivate_and_alert_limit: {e}")
