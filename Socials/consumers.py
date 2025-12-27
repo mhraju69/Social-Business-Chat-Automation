@@ -371,7 +371,29 @@ class AlertConsumer(AsyncWebsocketConsumer):
                 return None
         return Company.objects.filter(user=user).first()
 
-def send_alert(company, title, subtitle="", type="info"):
+def send_alert(target, title, subtitle="", type="info"):
+    """
+    Send an alert to a company. 
+    'target' can be a Company instance or a User instance (owner or employee).
+    """
+    company = None
+    
+    if isinstance(target, Company):
+        company = target
+    elif isinstance(target, User):
+        # Resolve company from user
+        if getattr(target, 'role', '') == 'employee':
+            try:
+                company = Employee.objects.get(email=target.email).company
+            except Employee.DoesNotExist:
+                pass
+        else:
+            company = getattr(target, 'company', None)
+            
+    if not company:
+        print(f"❌ send_alert failed: Could not resolve company for {target}")
+        return None
+
     # 1. Save to DB
     alert = Alert.objects.create(
         company=company,
@@ -383,13 +405,14 @@ def send_alert(company, title, subtitle="", type="info"):
 
     # 2. Send real-time via WebSocket
     channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        f"alerts_company_{company.id}",  
-        {
-            "type": "send_alert", 
-            "alert": AlertSerializer(alert).data
-        }
-    )
+    if channel_layer:
+        async_to_sync(channel_layer.group_send)(
+            f"alerts_company_{company.id}",  
+            {
+                "type": "send_alert", 
+                "alert": AlertSerializer(alert).data
+            }
+        )
     
     return alert
 

@@ -61,9 +61,8 @@ def unified_webhook(request, platform):
                 text = msg.get("text", {}).get("body", "")
 
                 # Token count check
-                # if not check_token_count(profile.user.company.id, 1):
-                #     send_alert(profile.user, "Token Limit Reached", "Your token balance is low. Please upgrade your plan to continue using the bot.", type="error")
-                #     return JsonResponse({"status": "error", "message": "Token limit reached."}, status=400)
+                if not check_token_count(profile.user.company.id, 1):
+                    return JsonResponse({"status": "error", "message": "Token limit reached."}, status=400)
 
             elif platform == "facebook":
                 print(f"📘 [Facebook] Webhook received")
@@ -99,7 +98,6 @@ def unified_webhook(request, platform):
 
                 # Token count check
                 if not check_token_count(profile.user.company.id, 1):
-                    send_alert(profile.user, "Token Limit Reached", "Your token balance is low. Please upgrade your plan to continue using the bot.", type="error")
                     return JsonResponse({"status": "error", "message": "Token limit reached."}, status=400)
 
             elif platform == "instagram":
@@ -128,7 +126,6 @@ def unified_webhook(request, platform):
 
                 # Token count check
                 if not check_token_count(profile.user.company.id, 1):
-                    send_alert(profile.user, "Token Limit Reached", "Your token balance is low. Please upgrade your plan to continue using the bot.", type="error")
                     return JsonResponse({"status": "error", "message": "Token limit reached."}, status=400)
 
             else:

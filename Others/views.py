@@ -932,7 +932,7 @@ class ActiveSessionsView(APIView):
             "is_active" : s.is_active
         } for s in list(reversed(sessions))[:5]]
 
-        return Response(data)
+        return Response(data[::-1])
 
 class LogoutSessionView(APIView):
     permission_classes = [IsAuthenticated]

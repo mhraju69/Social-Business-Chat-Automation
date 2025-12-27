@@ -116,6 +116,7 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
         return []
 
 def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] = None, tone: str = "professional") -> dict:
+    print(f"\n🚀 --- get_ai_response started (Company: {company_id}, Tone: {tone}) ---")
     """
     Generates an AI response for a specific company using RAG.
     
@@ -432,21 +433,32 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         token_usage["input_tokens"] += usage.get('prompt_tokens', 0)
         token_usage["output_tokens"] += usage.get('completion_tokens', 0)
         token_usage["total_tokens"] += usage.get('total_tokens', 0)
+    print("token_usage:😁😁😁😁😁", token_usage)
 
     # Define helper to deduct tokens
     def deduct_tokens_now():
         try:
+            input_tokens = token_usage.get("input_tokens", 0)
+            output_tokens = token_usage.get("output_tokens", 0)
             total = token_usage.get("total_tokens", 0)
+
+            print(f"--- 📊 AI TOKEN USAGE DEBUG (Company: {company_id}) ---")
+            print(f"🔹 Input Tokens:  {input_tokens}")
+            print(f"🔹 Output Tokens: {output_tokens}")
+            print(f"🔹 Total Tokens:  {total}")
+            print(f"--------------------------------------------------")
+
             if total > 0:
-                # Local import to avoid any potential top-level circular dependency risks, though checked it seems fine.
-                # Actually, standard import is better if safe. But let's use global import if possible or inside method.
-                # Using lookup inside to be safe and clean.
                 from Finance.models import Subscriptions 
                 sub = Subscriptions.objects.filter(company_id=company_id, active=True).first()
                 if sub:
                     sub.deduct_tokens(total)
+                    print(f"✅ Successfully deducted {total} tokens from subscription for company {company_id}")
                     logger.info(f"Deducted {total} tokens for company {company_id}")
+                else:
+                    print(f"⚠️ Warning: No active subscription found to deduct tokens for company {company_id}")
         except Exception as e:
+            print(f"❌ Error deducting tokens: {e}")
             logger.error(f"Error deducting tokens: {e}")
 
     # 5. Intent Handling (JSON Parsing)
@@ -557,6 +569,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         pass
 
     deduct_tokens_now()
+    print(f"✅ --- get_ai_response finished (Company: {company_id}) ---\n")
     return {
         "content": response_text,
         "token_usage": token_usage

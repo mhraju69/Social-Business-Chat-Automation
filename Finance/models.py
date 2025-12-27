@@ -28,6 +28,8 @@ class Plan(models.Model):
     duration = models.CharField(max_length=20, choices=DURATION)
     user_limit = models.IntegerField(default=0)
     token_limit = models.IntegerField(default=0)
+    stripe_product_id = models.CharField(max_length=255, blank=True, null=True)
+    stripe_price_id = models.CharField(max_length=255, blank=True, null=True)
     custom = models.BooleanField(default=False)
 
     def __str__(self):
@@ -41,6 +43,7 @@ class Subscriptions(models.Model):
     active = models.BooleanField(default=True)
     auto_renew = models.BooleanField(default=False)
     token_count = models.IntegerField(default=0)
+    stripe_subscription_id = models.CharField(max_length=255, blank=True, null=True)
     history = HistoricalRecords()
 
     def save(self, *args, **kwargs):

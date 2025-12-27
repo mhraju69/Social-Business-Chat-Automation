@@ -62,19 +62,22 @@ def create_checkout_session_for_subscription(request):
         target_user = get_company_user(request.user)
         company = Company.objects.filter(user=target_user).first()
         plan_id = request.data.get("plan_id")
-        auto_renew = request.data.get("auto_renew")
 
-        # Call stripe function
-        payment = create_stripe_checkout_for_subscription(
+        if not company:
+            return Response({"error": "Company not found"}, status=404)
+
+        # Call stripe function - returns Stripe Session object
+        session = create_stripe_checkout_for_subscription(
             company.id,
             plan_id,
-            auto_renew
         )
 
-        return Response({"redirect_url": payment.url}, status=status.HTTP_303_SEE_OTHER)
+        return Response({"redirect_url": session.url}, status=status.HTTP_303_SEE_OTHER)
 
     except ValueError as e:
         return Response({"error": str(e)}, status=400)
+    except Exception as e:
+        return Response({"error": f"Internal error: {str(e)}"}, status=500)
 
 
 @csrf_exempt
@@ -82,6 +85,7 @@ def create_checkout_session_for_subscription(request):
 @permission_classes([IsAuthenticated])
 def start_stripe_connect(request):
     """API to start Stripe Connect onboarding."""
+    # ... (same as before)
     target_user = get_company_user(request.user)
     company = getattr(target_user, 'company', None)
     if not company:
@@ -109,191 +113,124 @@ def stripe_connect_refresh(request):
 def stripe_webhook(request):
     payload = request.body
     sig_header = request.META.get('HTTP_STRIPE_SIGNATURE', '')
-
-    logger.info(f"Received webhook event with signature: {sig_header[:20]}...")
-
-    # Use platform secret for verification
     webhook_secret = settings.STRIPE_WEBHOOK_SECRET
 
     try:
         event = stripe.Webhook.construct_event(payload, sig_header, webhook_secret)
-        logger.info(f"✅ Webhook verified with secret: {webhook_secret[:10]}...")
     except Exception as e:
         logger.error(f"❌ Webhook verification failed: {str(e)}")
         return HttpResponse(status=400)
 
-    logger.info(f"✅ Verified event: {event['type']}")
-
     data = event['data']['object']
     metadata = data.get('metadata', {})
-
-    # Extract metadata
-    payment_id = metadata.get('payment_id')
-    company_id = metadata.get('company_id')
-    plan_id = metadata.get('plan_id')
-    auto_renew_meta = metadata.get('auto_renew')
-    
-    # Convert auto_renew string to boolean
-    auto_renew = str(auto_renew_meta).lower() == 'true'
-
-    logger.info(f"Webhook metadata - payment_id: {payment_id}, company_id: {company_id}, plan_id: {plan_id}, auto_renew: {auto_renew}")
-
-    # Fetch objects
-    payment = Payment.objects.filter(id=payment_id).first()
-    company = Company.objects.filter(id=company_id).first()
-    plan = Plan.objects.filter(id=plan_id).first() if plan_id else None
-
-    # Validate
-    if not payment:
-        logger.error(f"❌ Payment not found with ID: {payment_id}")
-        return HttpResponse(status=400)
-
-    logger.info(f"Found payment: ID={payment.id}, Type={payment.type}, Current Status={payment.status}")
-
-    if payment.type == "subscriptions" and not (company and plan):
-        logger.error(f"❌ Missing company or plan for subscription payment. Company: {company}, Plan: {plan}")
-        return HttpResponse(status=400)
+    stripe.api_key = settings.STRIPE_SECRET_KEY
 
     # ----------------------------------------------------------------------
-    # ✔ SUCCESSFUL PAYMENT
+    # 1. INITIAL SUBSCRIPTION PURCHASE (Checkout Completed)
     # ----------------------------------------------------------------------
     if event['type'] == 'checkout.session.completed':
-        # Use platform API key
-        stripe.api_key = settings.STRIPE_SECRET_KEY
+        session = data
+        mode = session.get('mode')
+        company_id = metadata.get('company_id')
+        plan_id = metadata.get('plan_id')
 
         try:
             with transaction.atomic():
-                # Update payment status
-                payment.status = "success"
-                payment.payment_date = timezone.now()
-                # Store PaymentIntent ID as transaction_id if available
-                payment.transaction_id = data.get('payment_intent') or data.get('id')
+                company = Company.objects.get(id=company_id)
                 
-                # Capture Invoice URL if generated (available in mode="payment" with invoice_creation enabled)
-                invoice_id = data.get('invoice')
-                if invoice_id:
-                    try:
-                        inv = stripe.Invoice.retrieve(invoice_id)
-                        payment.invoice_url = inv.hosted_invoice_url
-                        logger.info(f"📄 Saved Invoice URL for Payment {payment.id}")
-                    except Exception as e:
-                        logger.error(f"Error retrieving invoice {invoice_id}: {e}")
-
-                payment.save()
-                
-                logger.info(f"✅ Payment {payment.id} status updated to SUCCESS")
-
-                # Save Stripe Customer and Payment Method for future auto-renewal
-                customer_id = data.get('customer')
-                if customer_id and company:
+                # Update Company info
+                customer_id = session.get('customer')
+                if customer_id:
                     company.stripe_customer_id = customer_id
-                    
-                    # Try to get payment method from the session or payment intent
-                    payment_intent_id = data.get('payment_intent')
-                    if payment_intent_id:
-                        try:
-                            # Use the same API key used for the session
-                            pi = stripe.PaymentIntent.retrieve(payment_intent_id, api_key=stripe.api_key)
-                            if pi.get('payment_method'):
-                                company.stripe_payment_method_id = pi.get('payment_method')
-                                logger.info(f"💳 Saved Payment Method {pi.get('payment_method')} for Company {company.id}")
-                            else:
-                                logger.warning(f"⚠️ PaymentMethod not found on PaymentIntent {payment_intent_id}")
-                        except Exception as e:
-                            logger.error(f"Error retrieving PaymentIntent {payment_intent_id} for PM: {e}")
-                    
                     company.save()
-                    logger.info(f"👥 Saved Stripe Customer {customer_id} for Company {company.id}")
-                else:
-                    logger.warning(f"⚠️ No customer_id found in Stripe data for company {company_id if company_id else 'unknown'}")
 
-                # =================== SUBSCRIPTION PAYMENT =========================
-                if payment.type == "subscriptions":
-                    logger.info(f"Processing subscription payment for company: {company.id}")
-
-                    # Create or update subscription
-                    subscription, created = Subscriptions.objects.get_or_create(
+                if mode == 'subscription':
+                    plan = Plan.objects.get(id=plan_id)
+                    subscription_id = session.get('subscription')
+                    
+                    # Create or Update Subscription record
+                    sub_obj, created = Subscriptions.objects.get_or_create(
                         company=company,
                         defaults={
                             "plan": plan,
-                            "auto_renew": auto_renew,
+                            "stripe_subscription_id": subscription_id,
+                            "active": True,
+                            "auto_renew": True,
+                            "start": timezone.now()
                         }
                     )
-
                     if not created:
-                        # Subscription already exists → upgrade/renew
-                        subscription.plan = plan
-                        subscription.auto_renew = auto_renew
-                        subscription.start = timezone.now()
-                        subscription.active = True # Ensure it is active
-                        logger.info(f"Updated existing subscription {subscription.id}")
-                    else:
-                        logger.info(f"Created new subscription {subscription.id}")
-
-                    subscription.save()
-
-                    # Notify admins
-                    for admin in User.objects.filter(is_staff=True):
-                        send_alert(
-                            admin,
-                        "New subscription payment",
-                            f"{payment.amount} USD received for {plan.get_name_display()} plan from {payment.company.user.email}",
-                        "info"
-                        )
+                        sub_obj.plan = plan
+                        sub_obj.stripe_subscription_id = subscription_id
+                        sub_obj.active = True
+                        sub_obj.start = timezone.now()
+                        sub_obj.save()
                     
-                    logger.info(f"✅ Subscription payment processed successfully")
+                    logger.info(f"✅ Subscription {subscription_id} activated for company {company_id}")
 
-                # =================== SERVICE PAYMENT =============================
-                else:
-                    logger.info(f"Processing service payment for company: {company.id}")
-                    
-                    send_alert(
-                        payment.company.user,
-                        "Payment Received",
-                        f"{payment.amount} USD received for {payment.reason}",
-                        "info"
-                    )
-                    
-                    logger.info(f"✅ Service payment processed successfully")
+                # Create a Payment record for the initial charge
+                Payment.objects.create(
+                    company=company,
+                    type="subscriptions" if mode == 'subscription' else "services",
+                    amount=Decimal(session.get('amount_total', 0)) / 100,
+                    status="success",
+                    transaction_id=session.get('payment_intent') or session.get('id'),
+                    reason=f"Initial Subscription: {plan.name}" if mode == 'subscription' else "Service Payment",
+                    payment_date=timezone.now()
+                )
 
         except Exception as e:
-            logger.error(f"❌ Error processing successful payment: {str(e)}", exc_info=True)
+            logger.error(f"Error processing checkout.session.completed: {e}")
             return HttpResponse(status=500)
 
     # ----------------------------------------------------------------------
-    # ❌ FAILED PAYMENT
+    # 2. RENEWAL PAYMENT (Invoice Paid)
     # ----------------------------------------------------------------------
-    elif event['type'] in [
-        'payment_intent.payment_failed',
-        'charge.failed',
-        'checkout.session.async_payment_failed'
-    ]:
-        try:
-            with transaction.atomic():
-                payment.status = "failed"
-                payment.payment_date = timezone.now()
-                payment.save()
+    elif event['type'] == 'invoice.paid':
+        invoice = data
+        subscription_id = invoice.get('subscription')
+        
+        # We only care if it's a subscription invoice
+        if subscription_id:
+            try:
+                sub_obj = Subscriptions.objects.get(stripe_subscription_id=subscription_id)
                 
-                logger.warning(f"⚠️ Payment {payment.id} marked as FAILED")
+                with transaction.atomic():
+                    # Extend the subscription end date in our DB
+                    sub_obj.active = True
+                    # In our model's save(), it calculates 'end' based on 'start'. 
+                    # So we update 'start' to now (or period start) and 'end' to None to trigger recalculation.
+                    sub_obj.start = timezone.now()
+                    sub_obj.end = None 
+                    sub_obj.save()
 
-                if payment.type == "subscriptions":
-                    for admin in User.objects.filter(is_staff=True):
-                        send_alert(
-                            admin,
-                        "Subscription payment failed",
-                            f"{payment.amount} USD payment failed for subscription from {payment.company.user.email}",
-                        "warning"
-                        )
-                else:
-                    send_alert(
-                        payment.company.user,
-                        "Payment Failed",
-                        f"{payment.amount} USD payment failed for {payment.reason}",
-                        "warning"
+                    # Record the renewal payment
+                    Payment.objects.create(
+                        company=sub_obj.company,
+                        type="subscriptions",
+                        amount=Decimal(invoice.get('amount_paid', 0)) / 100,
+                        status="success",
+                        transaction_id=invoice.get('payment_intent'),
+                        reason=f"Subscription Renewal: {sub_obj.plan.name}",
+                        payment_date=timezone.now(),
+                        invoice_url=invoice.get('hosted_invoice_url')
                     )
-        except Exception as e:
-            logger.error(f"❌ Error processing failed payment: {str(e)}", exc_info=True)
-            return HttpResponse(status=500)
+                    logger.info(f"🔄 Subscription {subscription_id} renewed via invoice.paid")
+            except Subscriptions.DoesNotExist:
+                logger.warning(f"Invoice paid for unknown subscription: {subscription_id}")
+
+    # ----------------------------------------------------------------------
+    # 3. SUBSCRIPTION CANCELLED OR EXPIRED
+    # ----------------------------------------------------------------------
+    elif event['type'] == 'customer.subscription.deleted':
+        subscription_id = data.get('id')
+        try:
+            sub_obj = Subscriptions.objects.get(stripe_subscription_id=subscription_id)
+            sub_obj.active = False
+            sub_obj.save()
+            logger.info(f"🚫 Subscription {subscription_id} deactivated (cancelled/expired)")
+        except Subscriptions.DoesNotExist:
+            pass
 
     return HttpResponse(status=200)
 
@@ -318,3 +255,33 @@ class CheckPlan(APIView):
         paln = Subscriptions.objects.filter(company=company,active=True)
         
         return Response(SubscriptionSerializer(paln,many=True).data)
+
+class CancelSubscriptionView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        target_user = get_company_user(request.user)
+        company = getattr(target_user, 'company', None)
+        
+        if not company:
+            return Response({"error": "Company not found"}, status=404)
+
+        immediate = request.data.get("immediate", False)
+        subscription = Subscriptions.objects.filter(company=company, active=True).first()
+
+        if not subscription or not subscription.stripe_subscription_id:
+            return Response({"error": "No active Stripe subscription found"}, status=404)
+
+        success, message = cancel_stripe_subscription(subscription.stripe_subscription_id, immediate=immediate)
+        
+        if success:
+            if immediate:
+                subscription.active = False
+                subscription.auto_renew = False
+            else:
+                subscription.auto_renew = False
+            
+            subscription.save()
+            return Response({"message": message}, status=200)
+        else:
+            return Response({"error": message}, status=400)

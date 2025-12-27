@@ -109,7 +109,7 @@ def create_stripe_checkout_for_service(
 def create_stripe_checkout_for_subscription(
     company_id,
     plan_id,
-    auto_renew = False,
+    auto_renew = True, # For native subscriptions, auto_renew is usually the default
     ):
     try:
         company = Company.objects.get(id=company_id)
@@ -122,85 +122,140 @@ def create_stripe_checkout_for_subscription(
     if not plan:
         raise ValueError("Plan not found")
 
-    price_data = {
-        "currency": "eur",
-        "product_data": {"name": plan.get_name_display()},
-        "unit_amount": int(float(plan.price) * 100)
-    }
-    
-    print(f"DEBUG: Plan={plan.get_name_display()}, Price={plan.price}, Unit Amount={price_data['unit_amount']}")
-
-    payment = Payment.objects.create(
-        company=company,
-        client=company.user.email,
-        type="subscriptions",
-        amount=plan.price,
-        reason=plan.get_name_display(),
-        status="pending",
-    )
-
     stripe_client.api_key = api_key
-
-    # Success/cancel URLs
-    success_url = "https://www.youtube.com"
-    cancel_url = "https://www.facebook.com"
 
     # ---------------- METADATA ----------------
     metadata = {
-        "payment_id": str(payment.id),
         "company_id": str(company.id),
         "type": "subscriptions",
         "plan_id": str(plan_id),
-        "auto_renew": str(auto_renew).lower(),
     }
 
-    # If auto-renewal is enabled, we tell Stripe to save the payment method for off-session use
-    is_auto_renew_enabled = str(auto_renew).lower() == 'true'
-
-    # Ensure company has a Stripe Customer ID before session creation
-    # This is the most reliable way to get a customer_id back in the webhook
+    # Ensure company has a Stripe Customer ID
     if not company.stripe_customer_id:
         try:
-            stripe_client.api_key = api_key
             customer = stripe_client.Customer.create(
                 email=company.user.email,
-                name=company.name,
+                name=company.name or "Unknown",
                 metadata={"company_id": str(company.id)}
             )
             company.stripe_customer_id = customer.id
             company.save()
-            print(f"DEBUG: Created new Stripe Customer ID: {customer.id}")
         except Exception as e:
             print(f"DEBUG: Error creating Stripe customer: {e}")
+
+    # ---------------- STRIPE SUBSCRIPTION SETUP ----------------
+    # If using Native Stripe Subscriptions, we use Price IDs
+    # If stripe_price_id is missing, we create a temporary one (though usually these are pre-created)
+    if not plan.stripe_price_id:
+        # Fallback: create a recurring price on the fly if not exists
+        # In a production app, you'd ideally have these IDs already in the Plan model
+        try:
+            # First ensure we have a product
+            if not plan.stripe_product_id:
+                product = stripe_client.Product.create(name=plan.get_name_display())
+                plan.stripe_product_id = product.id
+                plan.save()
+            
+            # Create a monthly recurring price (adjust interval based on plan.duration)
+            interval = "month"
+            if plan.duration == "years": interval = "year"
+            elif plan.duration == "days": interval = "day"
+
+            price = stripe_client.Price.create(
+                unit_amount=int(float(plan.price) * 100),
+                currency="eur",
+                recurring={"interval": interval},
+                product=plan.stripe_product_id,
+            )
+            plan.stripe_price_id = price.id
+            plan.save()
+        except Exception as e:
+            raise ValueError(f"Failed to setup Stripe Price: {str(e)}")
 
     # ---------------- CREATE STRIPE CHECKOUT ----------------
     checkout_args = {
         "payment_method_types": ["card"],
-        "line_items": [{"price_data": price_data, "quantity": 1}],
-        "mode": "payment",
-        "success_url": success_url,
-        "cancel_url": cancel_url,
+        "line_items": [{"price": plan.stripe_price_id, "quantity": 1}],
+        "mode": "subscription", # Changed from 'payment' to 'subscription'
+        "success_url": "https://dashboard.talkfusion.ai/finance/success", # Update with your real URLs
+        "cancel_url": "https://dashboard.talkfusion.ai/finance/cancel",
         "metadata": metadata,
-        "invoice_creation": {"enabled": True},
+        "subscription_data": {
+            "metadata": metadata,
+        },
+        "customer": company.stripe_customer_id,
     }
-
-    if company.stripe_customer_id:
-        checkout_args["customer"] = company.stripe_customer_id
-    else:
-        # Emergency fallback
-        checkout_args["customer_email"] = company.user.email
-
-    if is_auto_renew_enabled:
-        checkout_args["payment_intent_data"] = {
-            "setup_future_usage": "off_session"
-        }
 
     session = stripe_client.checkout.Session.create(**checkout_args)
 
-    # Save Stripe session URL in Payment
-    payment.url = session.url
-    payment.save()
-    return payment
+    return session
+
+def update_existing_subscriptions_to_new_price(plan_id):
+    """
+    Call this function whenever a Plan's price is updated in Django.
+    It will find all active Stripe subscriptions for this plan and update them to the new price.
+    """
+    plan = Plan.objects.get(id=plan_id)
+    if not plan.stripe_price_id:
+        return False, "Plan has no Stripe Price ID"
+
+    stripe_client, api_key, _ = get_stripe_client()
+    stripe_client.api_key = api_key
+
+    # Find all subscriptions in our DB using this plan that have a stripe_subscription_id
+    active_subs = Subscriptions.objects.filter(plan=plan, active=True).exclude(stripe_subscription_id__isnull=True)
+    
+    success_count = 0
+    fail_count = 0
+
+    for sub in active_subs:
+        try:
+            # Retrieve the subscription from Stripe
+            stripe_sub = stripe_client.Subscription.retrieve(sub.stripe_subscription_id)
+            
+            # Find the subscription item ID
+            sub_item_id = stripe_sub['items']['data'][0]['id']
+
+            # Update subscription with new price
+            stripe_client.Subscription.modify(
+                sub.stripe_subscription_id,
+                items=[{
+                    'id': sub_item_id,
+                    'price': plan.stripe_price_id,
+                }],
+                proration_behavior='always_invoice', # Or 'create_prorations' depending on policy
+            )
+            success_count += 1
+        except Exception as e:
+            print(f"Error updating sub {sub.stripe_subscription_id}: {e}")
+            fail_count += 1
+
+    return True, f"Updated {success_count} subscriptions. Failed: {fail_count}."
+
+def cancel_stripe_subscription(subscription_id, immediate=False):
+    """
+    Cancel a Stripe subscription.
+    immediate=True -> Cancel right now.
+    immediate=False -> Turn off auto-renew (cancel at period end).
+    """
+    stripe_client, api_key, _ = get_stripe_client()
+    stripe_client.api_key = api_key
+
+    try:
+        if immediate:
+            # Hard cancel
+            deleted_subscription = stripe_client.Subscription.delete(subscription_id)
+            return True, "Subscription cancelled immediately."
+        else:
+            # Turn off auto-renew (Stripe calls this 'cancel_at_period_end')
+            updated_subscription = stripe_client.Subscription.modify(
+                subscription_id,
+                cancel_at_period_end=True
+            )
+            return True, "Auto-renewal turned off. Access will continue until end of period."
+    except Exception as e:
+        return False, str(e)
 
 
 

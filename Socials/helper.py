@@ -7,6 +7,7 @@ from django.core.cache import cache
 from django_redis import get_redis_connection
 from Others.models import Alert
 from Accounts.models import Company
+from Finance.models import Subscriptions
 
 def send_message(profile: ChatProfile, client_obj: ChatClient, message_text):
     try:
@@ -64,62 +65,49 @@ def send_message(profile: ChatProfile, client_obj: ChatClient, message_text):
         return {"error": str(e)}
 
 def check_token_count(company_id, count):
-    redis = get_redis_connection("default")
-    cache_key = f"company_token_{company_id}"
+    """
+    Simplified token count check. Direct database operation without Redis cache.
+    """
+    try:
+        # 1. Fetch active subscription
+        subscription = Subscriptions.objects.filter(
+            company__id=company_id, 
+            active=True,
+            end__gt=timezone.now()
+        ).first()
 
-    token_count = redis.get(cache_key)
-    
-    if token_count is None:
-        plan = Subscriptions.objects.filter(company__id=company_id).first()
-
-        if not plan or not plan.active or plan.end < timezone.now():
+        if not subscription:
             return False
 
-        token_count = plan.token_count
-        redis.set(cache_key, token_count)
-
-    with redis.pipeline() as pipe:
-        while True:
+        # 2. Check if tokens are exhausted
+        if subscription.token_count < count:
+            # Logic: Deactivate Chat Profiles + Send Alert
             try:
-                pipe.watch(cache_key)
-                current_tokens = int(pipe.get(cache_key))
+                company = Company.objects.get(id=company_id)
+                
+                # Deactivate Chat Profiles
+                ChatProfile.objects.filter(user=company.user).update(bot_active=False)
+                
+                # Send Real-time Alert
+                from .consumers import send_alert
+                send_alert(
+                    company, 
+                    "Token Limit Reached", 
+                    "Your AI tokens have been exhausted. Chat profiles are now inactive.", 
+                    type="error"
+                )
+                print(f"⚠️ Tokens exhausted for Company {company_id}. Profiles deactivated.")
+            except Exception as e:
+                print(f"Error handling token exhaustion: {e}")
+            
+            return False
 
-                if current_tokens < count:
-                    pipe.unwatch()
-                    
-                    # Logic: Deactivate Chat Profiles + Send Alert
-                    try:
-                        company = Company.objects.get(id=company_id)
-                        
-                        # 1. Deactivate Chat Profiles
-                        ChatProfile.objects.filter(user=company.user).update(bot_active=False)
-                        
-                        # 2. Check if alert already exists recently to avoid spamming?
-                        # For now, just create it.
-                        Alert.objects.create(
-                            company=company,
-                            title="Token Limit Reached",
-                            subtitle="Your AI tokens have been exhausted. Chat profiles are now inactive.",
-                            type="error"
-                        )
-                        print(f"⚠️ Tokens exhausted for Company {company_id}. Profiles deactivated.")
-                        
-                    except Exception as e:
-                        print(f"Error handling token exhaustion: {e}")
+        # 3. Deduct tokens and save
+        subscription.token_count -= count
+        subscription.save(update_fields=['token_count'])
+        
+        return True
 
-                    return False
-
-                new_token_count = current_tokens - count
-
-                pipe.multi()
-                pipe.set(cache_key, new_token_count)
-                pipe.execute()
-                break
-            except Exception:
-                continue
-
-    Subscriptions.objects.filter(company__id=company_id).update(
-        token_count=new_token_count
-    )
-
-    return True
+    except Exception as e:
+        print(f"❌ Error in check_token_count: {e}")
+        return False
