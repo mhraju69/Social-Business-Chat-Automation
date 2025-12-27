@@ -473,7 +473,21 @@ class SubscriptionPlanListView(generics.ListAPIView):
     serializer_class = PlanSerializers
     permission_classes = [IsAdmin]
 
-
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Retrieve and update a subscription plan",
+    ),
+    patch=extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Retrieve and update a subscription plan",
+    )
+)
+class SubscriptionPlanUpdateView(generics.RetrieveUpdateAPIView):
+    queryset = Plan.objects.exclude(custom=True)
+    serializer_class = PlanSerializers
+    permission_classes = [IsAdmin]
+    lookup_field = 'id'
 
 @extend_schema_view(
     get=extend_schema(
