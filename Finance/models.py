@@ -22,8 +22,8 @@ class Plan(models.Model):
         ("years", "Yearly"),
     ]
 
-    name = models.CharField(max_length=20, choices=PLAN,unique=True)
-    price = models.CharField(max_length=10)
+    name = models.CharField(max_length=20, choices=PLAN)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
     msg_limit = models.IntegerField(default=0)
     duration = models.CharField(max_length=20, choices=DURATION)
     user_limit = models.IntegerField(default=0)
@@ -34,6 +34,22 @@ class Plan(models.Model):
 
     def __str__(self):
         return f"{self.get_name_display()} ({self.get_duration_display()})"
+
+    def save(self, *args, **kwargs):
+        if self.name in ["essential", "growth"]:
+            existing = Plan.objects.filter(
+                name=self.name,
+                custom=False
+            ).exclude(id=self.id)
+
+            if existing.exists():
+                from django.core.exceptions import ValidationError
+                raise ValidationError(
+                    f"A default plan with name '{self.name}' already exists."
+                )
+
+        super().save(*args, **kwargs)
+
 
 class Subscriptions(models.Model):
     company = models.ForeignKey(Company, related_name='subscriptions', on_delete=models.CASCADE)

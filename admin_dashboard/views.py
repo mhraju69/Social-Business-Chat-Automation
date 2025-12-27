@@ -590,4 +590,21 @@ class CreateAdminTeamMemberView(generics.GenericAPIView):
             fail_silently=False,
         )
         return Response({"message": "Admin user created successfully."}, status=201)
-        
+
+class CreateCustomPlanView(generics.CreateAPIView):
+    queryset = Plan.objects.all()
+    serializer_class = PlanSerializers
+    permission_classes = [IsAdmin]
+
+    @extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Create a new custom subscription plan",
+    )
+    def post(self, request, *args, **kwargs):
+        return super().post(request, *args, **kwargs)
+    
+    def perform_create(self, serializer):
+        try:
+            serializer.save(custom=True)
+        except Exception as e:
+            raise serializers.ValidationError({"error": f"Error creating custom plan: {str(e)}"})
