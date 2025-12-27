@@ -322,8 +322,6 @@ class UserActivityLogView(APIView):
         serializer = ActivityLogSerializer(activities[:10], many=True)
         return Response(serializer.data)
 
-# ... (skipping unchanged code block) ...
-
 class FinanceDataView(APIView):
     permission_classes = [IsAuthenticated,IsEmployeeAndCanAccessFinancialData]
     
@@ -347,12 +345,6 @@ class FinanceDataView(APIView):
         }
 
         return Response(data)
-
-# ... (skipping SupportTicketViewSet) ...
-
-
-
-# ... (skipping methods in AnalyticsView) ...
 
 class ConnectGoogleCalendarView(APIView):
     permission_classes = [IsAuthenticated]
@@ -742,8 +734,7 @@ class AnalyticsView(generics.GenericAPIView):
             return queryset.filter(type="outgoing", send_by_bot=True)
 
         return queryset
-    
-    
+
 class SupportTicketViewSet(ModelViewSet):
     serializer_class = SupportTicketSerializer
     permission_classes = [permissions.IsAuthenticated]

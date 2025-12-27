@@ -90,13 +90,9 @@ def create_stripe_checkout_for_service(
         except Exception as e:
             print(f"❌ Error checking connect account status: {e}")
 
-    # Pass existing customer or email
-    if company.stripe_customer_id:
-        checkout_args["customer"] = company.stripe_customer_id
-    elif email:
+    # Pass client email if provided
+    if email:
         checkout_args["customer_email"] = email
-    elif company.user.email:
-        checkout_args["customer_email"] = company.user.email
 
     session = stripe_client.checkout.Session.create(**checkout_args)
 

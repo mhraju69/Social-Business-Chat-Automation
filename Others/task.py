@@ -155,6 +155,13 @@ def wait_and_reply(room_id, delay):
     # Get company from room -> profile -> user -> company
     company = room.profile.user.company
     
+    # Check Daily Message Limit
+    if not check_msg_limit(company.id):
+        print(f"🛑 [{room.profile.platform}] Daily message limit reached for company {company.id}. Skipping reply.")
+        room.is_waiting_reply = False
+        room.save(update_fields=["is_waiting_reply"])
+        return f"Daily limit reached for company {company.id}"
+
     reply_data = get_ai_response(
         company_id=company.id, 
         query=full_text, 
@@ -197,9 +204,17 @@ def cleanup_system():
     from django.db.models import Count
     from django.utils import timezone
     
-    # 1. Cleanup Token Cache
+    # 1. Cleanup Token Cache & Daily Usage
     try:
+        from Finance.models import Subscriptions, DailyUsage
         redis = get_redis_connection("default")
+        
+        # Cleanup DailyUsage (keep last 7 days)
+        seven_days_ago = timezone.now().date() - timezone.timedelta(days=7)
+        deleted_usage = DailyUsage.objects.filter(date__lt=seven_days_ago).delete()[0]
+        if deleted_usage > 0:
+            print(f"🗑️ Deleted {deleted_usage} old DailyUsage records")
+
         for key in redis.scan_iter("company_token_*"):
             try:
                 # Key is usually company_token_<id>
@@ -207,14 +222,14 @@ def cleanup_system():
                 key_str = key.decode() if isinstance(key, bytes) else key
                 company_id = key_str.split("_")[-1]
                 # Check if company has an active plan
-                plan = Subscriptions.objects.filter(company_id=company_id, is_active=True, end__gt=timezone.now()).exists()
+                plan = Subscriptions.objects.filter(company_id=company_id, active=True, end__gt=timezone.now()).exists()
                 if not plan:
                     redis.delete(key)
                     print(f"🗑️ Deleted useless token cache for company {company_id}")
             except Exception as e:
                 print(f"Error checking token key {key}: {e}")
     except Exception as e:
-        print(f"Redis connection error during cleanup: {e}")
+        print(f"Errors during redis/usage cleanup: {e}")
 
     # 2. Cleanup User Sessions (Keep 20 per user)
     users_with_many_sessions = UserSession.objects.values('user').annotate(counts=Count('id')).filter(counts__gt=20)
