@@ -57,11 +57,19 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
     Calculate available slots for a given date based on OpeningHours and existing Bookings.
     Returns a list of strings representing available start times.
     """
+    print(f"DEBUG: get_available_slots call for Company {company_id}, Date: {date_str}")
     try:
+        from django.utils import timezone
+        
         if not date_str:
             target_date = datetime.now()
         else:
-            target_date = datetime.strptime(date_str, "%Y-%m-%d")
+            # Handle potential ISO format or other variations if simple strptime fails
+            try:
+                target_date = datetime.strptime(date_str, "%Y-%m-%d")
+            except ValueError:
+                logger.error(f"Date parsing failed for {date_str}")
+                return []
             
         # Get weekday (mon, tue, etc.)
         day_map = {0: 'mon', 1: 'tue', 2: 'wed', 3: 'thu', 4: 'fri', 5: 'sat', 6: 'sun'}
@@ -73,10 +81,11 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
             return [] # Closed
             
         # Define working hours
-        start_time = datetime.combine(target_date, hours.start)
-        end_time = datetime.combine(target_date, hours.end)
+        start_time = datetime.combine(target_date.date(), hours.start)
+        end_time = datetime.combine(target_date.date(), hours.end)
         
         # Get Bookings for this day
+        # Ensure we filter properly using start_time__date
         bookings = Booking.objects.filter(
             company_id=company_id, 
             start_time__date=target_date.date()
@@ -85,7 +94,7 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
         booked_ranges = []
         for b in bookings:
             # We assume booking start/end are datetime objects
-            # Convert to naive for comparison if needed
+            # Convert to naive for comparison if needed matching start_time
             b_start = b.start_time.replace(tzinfo=None) if b.start_time.tzinfo else b.start_time
             if b.end_time:
                  b_end = b.end_time.replace(tzinfo=None) if b.end_time.tzinfo else b.end_time
@@ -97,6 +106,8 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
         # Generate Slots (Hourly)
         slots = []
         current = start_time
+        now_naive = datetime.now()
+        
         while current + timedelta(hours=1) <= end_time:
             slot_end = current + timedelta(hours=1)
             is_taken = False
@@ -106,11 +117,15 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
                     is_taken = True
                     break
             
-            if not is_taken and current > datetime.now(): # Only future slots
-                slots.append(current.strftime("%H:%M"))
+            # Use naive comparison for future check
+            if not is_taken:
+                 # If checking today, ensure we don't show past slots
+                 # For future dates, current > now is always true or irrelevant if we just check date
+                 if current.date() > now_naive.date() or (current.date() == now_naive.date() and current > now_naive):
+                    slots.append(current.strftime("%H:%M"))
             
             current += timedelta(hours=1)
-            
+        
         return slots
     except Exception as e:
         logger.error(f"Error calculating slots: {e}")
@@ -371,7 +386,8 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     - If the user wants to book:
     Collect the following details (ask only for what is missing):
     1. Service name / title
-    2. Preferred date & time (Calculate exact YYYY-MM-DD based on current date {current_date} if relative)
+    2. Preferred date & time (Calculate exact YYYY-MM-DD based on current date {current_date} ({current_day})).
+       IMPORTANT: If current month is December and user says "next January", the year must be next year.
     3. Email address
 
     - Once ALL THREE details are collected, output JSON ONLY:
@@ -455,13 +471,15 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     # Remove StrOutputParser to get full AIMessage object with metadata
     chain = prompt | llm 
     
+    current_dt = datetime.now()
     response = chain.invoke({
         "company_name": company_name,
         "context": context_text, 
         "question": query,
         "history": history_text,
         "tone": tone,
-        "current_date": datetime.now().strftime("%Y-%m-%d")
+        "current_date": current_dt.strftime("%Y-%m-%d"),
+        "current_day": current_dt.strftime("%A")
     })
     
     response_text = response.content
@@ -546,13 +564,15 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                     system_msg = f"System Info: No slots available for {date_str or 'today'}."
                 
                 # Re-prompt LLM
+                current_now = datetime.now()
                 response_2 = chain.invoke({
                     "company_name": company_name,
                     "context": context_text + "\n" + system_msg, 
                     "question": query, 
                     "history": history_text + f"\nAssistant (Internal): Checking slots for {date_str}.\nSystem: {system_msg}",
                     "tone": tone,
-                    "current_date": datetime.now().strftime("%Y-%m-%d")
+                    "current_date": current_now.strftime("%Y-%m-%d"),
+                    "current_day": current_now.strftime("%A")
                 })
                 
                 response_text = response_2.content
