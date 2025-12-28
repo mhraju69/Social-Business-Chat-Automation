@@ -601,10 +601,28 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
             elif action == "create_booking":
                 from Others.helper import create_booking
                 booking_details = data.get("booking_data")
+                
+                # Validation: Prevent past bookings
+                start_time_str = booking_details.get("start_time")
+                if start_time_str:
+                    try:
+                         # Handle typical format "YYYY-MM-DD HH:MM:SS"
+                         s_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+                         if s_time < datetime.now():
+                             deduct_tokens_now()
+                             return {
+                                 "content": f"I cannot book appointments in the past ({start_time_str}). Please search for a future time slot.",
+                                 "token_usage": token_usage
+                             }
+                    except ValueError:
+                        # If format is weird, maybe let backend handle or fail safe?
+                        # Let's try flexible parsing or just proceed to backend which might error out
+                        pass
+
                 # Create Mock Request
                 mock_req = MockRequest(data=booking_details)
                 # Call helper
-                # Call helper
+            
                 try:
                     booking = create_booking(mock_req, company_id)
                     # Assuming create_booking returns a Booking object or Response
