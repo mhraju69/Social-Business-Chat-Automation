@@ -24,6 +24,7 @@ from django.conf import settings
 from django.core.mail import send_mail
 from .models import AdminActivity, UserPlanRequest
 from Finance.serializers import SubscriptionSerializer, PlanSerializers
+from Finance.helper import create_stripe_checkout_for_subscription
 
 class DashboardView(generics.GenericAPIView):
     permission_classes = [IsAdmin]
@@ -689,6 +690,16 @@ class ApproveUserPlanRequestView(generics.GenericAPIView):
             plan_request.custom_plan = custom_plan
             plan_request.is_approved = True
             plan_request.save()
+
+            company = plan_request.user.company
+            session = create_stripe_checkout_for_subscription(company, custom_plan.id)
+            send_mail(
+                'Custom Plan Approved',
+                f'Your custom plan request has been approved. Please proceed to payment using the following link: {session.url}',
+                settings.DEFAULT_FROM_EMAIL,
+                [plan_request.user.email],
+                fail_silently=True,
+            )
             return Response({"message": "Plan request approved successfully."}, status=200)
         except UserPlanRequest.DoesNotExist:
             return Response({"error": "Plan request not found or already approved."}, status=400)
