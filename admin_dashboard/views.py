@@ -16,13 +16,13 @@ from rest_framework.filters import OrderingFilter, SearchFilter
 from Accounts.permissions import IsAdmin
 from drf_spectacular.utils import extend_schema_view, extend_schema, inline_serializer
 from rest_framework import serializers
-from .serializers import AdminTeamMemberSerializer, ChannelOverviewSerializer, SimpleUserSerializer, AdminCompanySerializer
+from .serializers import AdminTeamMemberSerializer, ChannelOverviewSerializer, SimpleUserSerializer, AdminCompanySerializer, UserPlanRequestSerializer
 from rest_framework.pagination import PageNumberPagination
 from datetime import timedelta
 from .utils import get_today, percentage_change
 from django.conf import settings
 from django.core.mail import send_mail
-from .models import AdminActivity
+from .models import AdminActivity, UserPlanRequest
 from Finance.serializers import SubscriptionSerializer, PlanSerializers
 
 class DashboardView(generics.GenericAPIView):
@@ -608,3 +608,88 @@ class CreateCustomPlanView(generics.CreateAPIView):
             serializer.save(custom=True)
         except Exception as e:
             raise serializers.ValidationError({"error": f"Error creating custom plan: {str(e)}"})
+
+@extend_schema_view(
+    get=extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Get list of user plan requests",
+    )
+)
+class UserPlanRequestListView(generics.ListAPIView):
+    queryset = UserPlanRequest.objects.filter(is_approved=False).select_related('user', 'custom_plan')
+    serializer_class = UserPlanRequestSerializer
+    permission_classes = [IsAdmin]
+
+
+class RequestCustomPlanView(generics.CreateAPIView):
+    queryset = UserPlanRequest.objects.all()
+    serializer_class = UserPlanRequestSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    @extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Request a custom subscription plan",
+    )
+    def post(self, request, *args, **kwargs):
+        return super().post(request, *args, **kwargs)
+    
+    def perform_create(self, serializer):
+        try:
+            serializer.save(user=self.request.user)
+        except Exception as e:
+            raise serializers.ValidationError({"error": f"Error requesting custom plan: {str(e)}"})
+
+class ApproveUserPlanRequestView(generics.GenericAPIView):
+    
+    permission_classes = [IsAdmin]
+
+    @extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Approve a user plan request",
+        request=inline_serializer(
+            name="ApproveUserPlanRequest",
+            fields={
+                "id": serializers.IntegerField(),
+                "price": serializers.FloatField()
+            }
+        ),
+        responses={
+            200: {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string"},
+                },
+            },
+            400: {
+                "type": "object",
+                "properties": {
+                    "error": {"type": "string"},
+                },
+            },
+        }
+    )
+    def post(self, request, *args, **kwargs):
+        request_id = request.data.get('id')
+        price = request.data.get('price')
+        if not request_id or price is None:
+            return Response({"error": "Request ID(id) and price are required."}, status=400)
+        try:
+            plan_request = UserPlanRequest.objects.get(id=request_id, is_approved=False)
+
+            custom_plan = Plan.objects.create(
+                name="enterprise",
+                duration='months',
+                price=price,
+                msg_limit=plan_request.msg_limit,
+                user_limit=plan_request.user_limit,
+                token_limit=plan_request.token_limit,
+                custom=True
+            )
+
+            plan_request.custom_plan = custom_plan
+            plan_request.is_approved = True
+            plan_request.save()
+            return Response({"message": "Plan request approved successfully."}, status=200)
+        except UserPlanRequest.DoesNotExist:
+            return Response({"error": "Plan request not found or already approved."}, status=400)
+

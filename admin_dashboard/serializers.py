@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from Accounts.models import User, Company
 from Finance.models import Payment
-from admin_dashboard.models import AdminActivity
+from admin_dashboard.models import AdminActivity, UserPlanRequest
 
 class SimpleUserSerializer(serializers.ModelSerializer):
     company_name = serializers.CharField(source='company.name', read_only=True)
@@ -27,7 +27,6 @@ class  AdminCompanySerializer(serializers.ModelSerializer):
         return None
     
     def get_invoice(self, obj):
-        # TODO change it later to get actual invoice data
         payment = Payment.objects.filter(company=obj).first()
         invoice_url = payment.invoice_url if payment else None
         if invoice_url:
@@ -106,7 +105,12 @@ class ChannelOverviewSerializer(serializers.ModelSerializer):
         return None
     
     def get_status_message(self, obj):
-        return "HI baby"
+        return "Healthy"
 
-
+class UserPlanRequestSerializer(serializers.ModelSerializer):
+    email = serializers.EmailField(source='user.email', read_only=True)
+    user = SimpleUserSerializer(read_only=True)
+    class Meta:
+        model = UserPlanRequest
+        fields = ['id', 'user', 'email', 'msg_limit', 'user_limit', 'token_limit']
     
