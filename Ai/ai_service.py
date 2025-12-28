@@ -33,7 +33,8 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 
 from Others.models import OpeningHours, Booking
-from Accounts.models import Company
+from Accounts.models import Company, Service
+from Finance.helper import create_stripe_checkout_for_service
 
 # Logging Configuration
 logging.basicConfig(level=logging.INFO)
@@ -245,6 +246,21 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         except Exception as e:
             logging.error(f"Error fetching realtime bookings: {e}")
 
+    # --- Service/Product List Context ---
+    if company:
+        try:
+            services = Service.objects.filter(company=company)
+            if services.exists():
+                service_text = "\n\n--- AVAILABLE SERVICES & PRODUCTS ---\n"
+                service_text += "Name | Price | Description\n"
+                for s in services:
+                    service_text += f"{s.name} | €{s.price} | {s.description or ''}\n"
+                
+                context_text += service_text
+                logging.info(f"Attached {len(services)} services to context.")
+        except Exception as e:
+            logging.error(f"Error fetching services: {e}")
+
     # print(f"DEBUG: Retrieved Context:\n{context_text}\n-------------------")
     
     if not context_text:
@@ -283,6 +299,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     - Sound conversational and human — never robotic, scripted, or overly formal.
     - Keep responses clear, helpful, and concise.
     - Maintain continuity with the conversation history at all times.
+    - Always detect the language of the user's message and reply in the same language.
 
     The client should always feel they are speaking with a real person from "{company_name}".
 
@@ -352,9 +369,9 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     }}
 
     - If the user wants to book:
-    Ask for the following ONE BY ONE:
+    Collect the following details (ask only for what is missing):
     1. Service name / title
-    2. Preferred date & time
+    2. Preferred date & time (Calculate exact YYYY-MM-DD based on current date {current_date} if relative)
     3. Email address
 
     - Once ALL THREE details are collected, output JSON ONLY:
@@ -370,6 +387,34 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     IMPORTANT:
     - Do NOT output booking JSON until all details are collected.
     - Do NOT add any extra text before or after JSON responses.
+
+    ────────────────────────────
+    PAYMENT & CHECKOUT LOGIC
+    ────────────────────────────
+    - If the user wants to buy/pay for services/products:
+    
+    1. Identify exactly which items they want (single or multiple).
+    2. Respond with the list of items and the TOTAL price.
+    3. Ask if they want to proceed with payment.
+    
+    - If they say YES/AGREE:
+      Ask for their:
+      1. Email address
+      2. Address (if applicable/needed for billing)
+      
+    - Once you have the Email, output JSON ONLY:
+    {{
+        "action": "create_payment_link",
+        "payment_data": {{
+            "items": ["Item Name 1", "Item Name 2"], 
+            "email": "user@example.com",
+            "address": "User Address" (or null if not provided)
+        }}
+    }}
+    
+    IMPORTANT:
+    - Verify item names match the context list exactly if possible.
+    - Do not invent prices. Use the ones from the context.
 
     TONE CONTROL & ADAPTATION
     ────────────────────────
@@ -539,6 +584,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                 # Create Mock Request
                 mock_req = MockRequest(data=booking_details)
                 # Call helper
+                # Call helper
                 try:
                     booking = create_booking(mock_req, company_id)
                     # Assuming create_booking returns a Booking object or Response
@@ -562,6 +608,84 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                         "content": "Sorry, I couldn't complete the booking at this moment.",
                         "token_usage": token_usage
                     }
+
+            elif action == "create_payment_link":
+                payment_data = data.get("payment_data", {})
+                items = payment_data.get("items", [])
+                email = payment_data.get("email")
+                address = payment_data.get("address", "")
+                
+                if not items or not email:
+                    # Missing info, prompt user back
+                     deduct_tokens_now()
+                     return {
+                         "content": "I need both the list of items and your email address to generate a payment link.",
+                         "token_usage": token_usage
+                     }
+
+                # Calculate Amount securely from DB
+                total_amount = 0.0
+                valid_items = []
+                
+                # Fetch all company services to match
+                db_services = Service.objects.filter(company_id=company_id)
+                
+                for item_name in items:
+                    # Simple case-insensitive matching
+                    service = next((s for s in db_services if s.name.lower() == item_name.lower()), None)
+                    if service:
+                        total_amount += float(service.price)
+                        valid_items.append(service.name)
+                    else:
+                        # Fallback: if exact match fails, maybe the AI passed a close name? 
+                        # For now, we'll just log it or add 0, or trust the user? 
+                        # Security-wise, skipping unknown items is safer.
+                        pass
+                
+                if total_amount <= 0:
+                     deduct_tokens_now()
+                     return {
+                         "content": "I couldn't find the specific prices for those items. Please verify the exact service names.",
+                         "token_usage": token_usage
+                     }
+
+                reason = ", ".join(valid_items)
+                if address:
+                    reason += f" (Address: {address})"
+                
+                try:
+                    payment = create_stripe_checkout_for_service(
+                        company_id=company_id,
+                        email=email,
+                        amount=total_amount,
+                        reason=reason
+                    )
+                    
+                    if payment and payment.url:
+                        deduct_tokens_now()
+                        return {
+                            "content": f"Here is your payment link for {reason} (Total: €{total_amount}):\n{payment.url}\n\nPlease complete the payment to proceed.",
+                            "token_usage": token_usage
+                        }
+                    else:
+                        deduct_tokens_now()
+                        return {
+                            "content": "I wasn't able to generate the payment link correctly. Please try again later.",
+                            "token_usage": token_usage
+                        }
+                except ValueError as e:
+                     deduct_tokens_now()
+                     return {
+                         "content": f"I couldn't generate the link: {str(e)}",
+                         "token_usage": token_usage
+                     }
+                except Exception as e:
+                     logger.error(f"Payment Link Generation Error: {e}")
+                     deduct_tokens_now()
+                     return {
+                         "content": "An internal error occurred while generating the payment link.",
+                         "token_usage": token_usage
+                     }
 
     except Exception as e:
         # Not JSON or parsing failed, just return text
