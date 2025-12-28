@@ -6,6 +6,7 @@ from django.conf import settings
 logger = logging.getLogger(__name__)
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
+from Others.models import UserSession
 
 def send_otp(email, task=None):
     if not email:
@@ -163,3 +164,82 @@ def get_company_user(user):
         except Employee.DoesNotExist:
             return None
     return user
+
+def generate_session(request, user, access):
+    # Try to parse User Agent and Client Info
+    try:
+        ua_string = request.META.get('HTTP_USER_AGENT', '')
+        print(f"☘️☘️☘️☘️☘️☘️User Agent: {ua_string}")
+        
+        details = ua_string.split(",")
+        device = f"{details[0].strip()} {details[1].strip()}"
+        platform = details[2].strip()
+        
+    except :
+        
+        ua_string = request.META.get('HTTP_USER_AGENT', '')
+        client_info_str = request.META.get('HTTP_X_CLIENT_INFO', '')
+        
+        device = "Unknown"
+        platform = "Unknown"
+        
+        try:
+            if client_info_str:
+                import json
+                client_data = json.loads(client_info_str)
+                p_platform = client_data.get('platform', '')
+                platform = p_platform if p_platform else "Unknown"
+        except Exception as e:
+            print(f"Error parsing HTTP_X_CLIENT_INFO: {e}")
+
+        try:
+            from user_agents import parse
+            user_agent = parse(ua_string)
+            
+            d_family = user_agent.device.family
+            if d_family == "Other":
+                d_family = "Desktop" # Or just Generic
+            
+            device = f"{d_family} / {user_agent.browser.family} {user_agent.browser.version_string}"
+            platform = f"{user_agent.os.family} {user_agent.os.version_string}"
+            
+        except ImportError:
+            pass
+        except Exception as e:
+            print(f"Error parsing User Agent with lib: {e}")
+            try:
+                if "Windows" in ua_string:
+                    platform = "Windows"
+                    device = "Desktop"
+                elif "Android" in ua_string:
+                    platform = "Android"
+                    device = "Mobile"
+                elif "iPhone" in ua_string:
+                    platform = "iOS"
+                    device = "Mobile"
+            except:
+                pass
+
+
+    session = UserSession.objects.create(
+        user=user,
+        device=device,
+        browser=platform,
+        ip_address=get_client_ip(request),
+        token=str(access['jti']),
+        location=get_location(get_client_ip(request))
+    )
+
+    # Trigger AI Analysis Pre-warming
+    try:
+        # Check if user has a company attributed to them
+        if hasattr(user, 'company'):
+            from Ai.tasks import analyze_company_data_task
+            # Run in background
+            analyze_company_data_task.delay(user.company.id)
+    except Exception as e:
+        # logging.error(f"Failed to trigger analysis task: {e}")
+        print(f"Failed to trigger analysis task: {e}")
+
+
+    return session

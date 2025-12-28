@@ -1,4 +1,5 @@
-from .models import Company, Payment, Plan
+from .models import Payment, Plan,Subscriptions
+from Accounts.models import Company
 from django.http import Http404
 from django.conf import settings
 import stripe

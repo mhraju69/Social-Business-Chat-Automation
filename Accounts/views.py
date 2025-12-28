@@ -339,6 +339,7 @@ class SocialAuthCallbackView(APIView):
         if not access_token:
             return Response({'error': 'No access token provided'}, status=400)
         print(access_token)
+        
         try:
             # Verify token
             token_info_response = requests.get(
@@ -403,14 +404,17 @@ class SocialAuthCallbackView(APIView):
             # Generate JWT tokens
             refresh = RefreshToken.for_user(user)
             serializer = UserSerializer(user)
-
-            return Response({
-                'access': str(refresh.access_token),
-                'refresh': str(refresh),
-                'user': serializer.data,
-            })
+            access = refresh.access_token
+            refresh = refresh
+            
+            session = generate_session(request, user, access)   
+            employee = Employee.objects.filter(email__iexact=user.email).first()
+            return Response({"user": serializer.data, "access": str(access), "refresh": str(refresh), "session_id": session.id,"role": employee.roles if employee else None})
 
         except Exception as e:
+            # print full error
+            import traceback
+            print(traceback.format_exc())
             return Response({'error': str(e)}, status=500)
 
 class UserDataView(APIView):

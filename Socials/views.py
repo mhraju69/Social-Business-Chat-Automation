@@ -317,6 +317,164 @@ def instagram_callback(request):
     else:
         return redirect(f"{settings.FRONTEND_URL}/user/integrations")
 
+class ConnectWhatsappView(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        target_user = get_company_user(request.user)
+        if not target_user:
+            return Response({"error": "User not found (company user)"}, status=404)
+        
+        try:
+            company = target_user.company
+        except Exception:
+            return Response({"error": "Company not found"}, status=404)
+    
+        state = target_user.id
+        whatsapp_redirect_uri = "https://ape-in-eft.ngrok-free.app/whatsapp/callback/"
+
+        redirect_url = f"https://www.facebook.com/v19.0/dialog/oauth?client_id={settings.FB_APP_ID}&redirect_uri={whatsapp_redirect_uri}&state={state},{request.query_params.get('from','web')}&response_type=code&config_id={settings.WHATSAPP_CONFIG_ID}"
+        
+        return Response({"redirect_url": redirect_url})
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def whatsapp_callback(request):
+    code = request.GET.get("code")
+    error = request.GET.get("error")
+    state_data = request.GET.get("state")
+    
+    # Parse state to get user ID and source
+    if state_data and "," in state_data:
+        state = state_data.split(",")[0]
+        _from = state_data.split(",")[1]
+    else:
+        state = state_data
+        _from = "web"
+    
+    print(f"WhatsApp callback: code={code}, error={error}, state={state_data}, from={_from}")
+
+    if error:
+        return JsonResponse({"error": error})
+    if not code:
+        return JsonResponse({"error": "Missing code parameter"})
+
+    # Exchange code for access token
+    token_url = "https://graph.facebook.com/v19.0/oauth/access_token"
+    params = {
+        "client_id": settings.FB_APP_ID,
+        "redirect_uri": "https://ape-in-eft.ngrok-free.app/whatsapp/callback/",
+        "client_secret": settings.FB_APP_SECRET,
+        "code": code,
+    }
+    
+    resp = requests.get(token_url, params=params)
+    data = resp.json()
+    
+    if "access_token" not in data:
+        return JsonResponse({"error": "Token exchange failed", "details": data})
+
+    access_token = data["access_token"]
+
+    # Get WhatsApp Business Account details
+    # First, get the WABA ID from the debug token or business accounts
+    debug_url = "https://graph.facebook.com/v19.0/debug_token"
+    debug_params = {
+        "input_token": access_token,
+        "access_token": f"{settings.FB_APP_ID}|{settings.FB_APP_SECRET}"
+    }
+    
+    debug_resp = requests.get(debug_url, params=debug_params)
+    debug_data = debug_resp.json()
+    
+    # Get WABA (WhatsApp Business Account) information
+    # Try to get WABA from the user's business accounts
+    waba_url = "https://graph.facebook.com/v19.0/me"
+    waba_params = {
+        "fields": "id,name",
+        "access_token": access_token
+    }
+    
+    waba_resp = requests.get(waba_url, params=waba_params)
+    waba_data = waba_resp.json()
+    
+    # Get phone number ID and details
+    # The embedded signup flow should provide WABA ID in the token granular scopes
+    # Let's try to get the phone number ID from the accounts endpoint
+    phone_url = "https://graph.facebook.com/v19.0/me/accounts"
+    phone_params = {
+        "access_token": access_token
+    }
+    
+    phone_resp = requests.get(phone_url, params=phone_params)
+    phone_data = phone_resp.json()
+    
+    # For WhatsApp, we need to get the WABA and phone number ID
+    # The token should have granular_scopes that include the WABA ID
+    granular_scopes = debug_data.get("data", {}).get("granular_scopes", [])
+    waba_id = None
+    
+    for scope in granular_scopes:
+        if scope.get("scope") == "whatsapp_business_management":
+            target_ids = scope.get("target_ids", [])
+            if target_ids:
+                waba_id = target_ids[0]
+                break
+    
+    if not waba_id:
+        return JsonResponse({"error": "WhatsApp Business Account ID not found in token"})
+
+    # Get phone numbers associated with this WABA
+    phone_numbers_url = f"https://graph.facebook.com/v19.0/{waba_id}/phone_numbers"
+    phone_numbers_params = {
+        "access_token": access_token
+    }
+    
+    phone_numbers_resp = requests.get(phone_numbers_url, params=phone_numbers_params)
+    phone_numbers_data = phone_numbers_resp.json()
+    
+    if "data" not in phone_numbers_data or not phone_numbers_data["data"]:
+        return JsonResponse({"error": "No phone numbers found for WhatsApp Business Account"})
+
+    try:
+        user = User.objects.get(id=state)
+    except User.DoesNotExist:
+        return JsonResponse({"error": "User not found"})
+
+    # Save the first phone number (or you can modify to save all)
+    saved_profiles = []
+    
+    for phone in phone_numbers_data["data"]:
+        phone_number_id = phone["id"]
+        display_phone_number = phone.get("display_phone_number", "")
+        verified_name = phone.get("verified_name", "")
+        
+        # Create or update the WhatsApp ChatProfile
+        whatsapp_profile, created = ChatProfile.objects.update_or_create(
+            profile_id=phone_number_id,
+            defaults={
+                "user": user,
+                "name": verified_name or display_phone_number,
+                "access_token": access_token,
+                "bot_active": True,
+                "platform": "whatsapp",
+            }
+        )
+        
+        saved_profiles.append({
+            "id": phone_number_id,
+            "name": verified_name or display_phone_number,
+            "display_phone_number": display_phone_number,
+            "created": created
+        })
+        
+        # For now, only save the first phone number
+        break
+    
+    if _from == "app":
+        return render(request, 'redirect.html')
+    else:
+        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
+    
 
 class ChatProfileView(RetrieveUpdateAPIView):
     permission_classes = [IsAuthenticated]

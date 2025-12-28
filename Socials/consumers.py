@@ -301,6 +301,7 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
             print(f"❌ Send Message Error: {e}")
             return {'success': False, 'error': str(e)}
 
+
 def broadcast_message(profile, client_obj, message_text, message_type, room_id=None):
     try:
         channel_layer = get_channel_layer()
@@ -421,7 +422,7 @@ class TestChatConsumer(AsyncWebsocketConsumer):
         self.room_group_name = "ai_chat"
         try:
             token = self.scope['query_string'].decode().split('token=')[-1]
-            self.user = await GlobalChatConsumer.get_user_from_token(self, token) 
+            self.user = await GlobalChatConsumer.get_user_from_token(token) 
             
             if not self.user:
                 await self.close()
