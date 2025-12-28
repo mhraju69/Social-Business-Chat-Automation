@@ -1,0 +1,43 @@
+
+--- Step 1: Check Availability ---
+
+🚀 --- get_ai_response started (Company: 2, Tone: professional) ---
+token_usage:😁😁😁😁😁 {'input_tokens': 2206, 'output_tokens': 23, 'total_tokens': 2229}
+DEBUG: Found JSON String: {
+    "action": "check_availability",
+    "date": "2025-12-29"
+}
+DEBUG: Action: check_availability
+DEBUG: get_available_slots call for Company 2, Date: 2025-12-29
+--- 📊 AI TOKEN USAGE DEBUG (Company: 2) ---
+🔹 Input Tokens:  4541
+🔹 Output Tokens: 51
+🔹 Total Tokens:  4592
+--------------------------------------------------
+❌ Error deducting tokens: no such column: Finance_subscriptions.token_count
+AI: At the moment, I don’t have the exact details on that. Let me check and get back to you shortly with the right information.
+
+--- Step 2: Create Booking ---
+User: I want to book a Steam Bath for next Monday at 10am. My email is debug@example.com.
+
+🚀 --- get_ai_response started (Company: 2, Tone: professional) ---
+token_usage:😁😁😁😁😁 {'input_tokens': 1928, 'output_tokens': 54, 'total_tokens': 1982}
+DEBUG: Found JSON String: {
+    "action": "create_booking",
+    "booking_data": {
+        "title": "Steam Bath",
+        "start_time": "2026-01-05 10:00:00",
+        "client": "debug@example.com"
+    }
+}
+DEBUG: Action: create_booking
+❌ Token refresh failed: {'error': 'invalid_grant', 'error_description': 'Token has been expired or revoked.'}
+❌ Google Calendar Error: Unable to get access token from refresh token
+--- 📊 AI TOKEN USAGE DEBUG (Company: 2) ---
+🔹 Input Tokens:  1928
+🔹 Output Tokens: 54
+🔹 Total Tokens:  1982
+--------------------------------------------------
+❌ Error deducting tokens: no such column: Finance_subscriptions.token_count
+AI Response Full: {'content': 'Booking confirmed! Your appointment for Steam Bath is set for 2026-01-05 10:00:00+00:00.', 'token_usage': {'input_tokens': 1928, 'output_tokens': 54, 'total_tokens': 1982}}
+AI Content: Booking confirmed! Your appointment for Steam Bath is set for 2026-01-05 10:00:00+00:00.
