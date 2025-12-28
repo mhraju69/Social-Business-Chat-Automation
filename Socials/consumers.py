@@ -419,12 +419,25 @@ def send_alert(target, title, subtitle="", type="info"):
 class TestChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.room_group_name = "ai_chat"
-        token = self.scope['query_string'].decode().split('token=')[-1]
-        self.user = await GlobalChatConsumer.get_user_from_token(token)
-        self.company = await self.get_company_from_user(self.user)
-        await self.channel_layer.group_add(self.room_group_name, self.channel_name)
-        await self.accept()
-        await self.send(text_data=json.dumps({"message": "Welcome to test chat with AI !"}))
+        try:
+            token = self.scope['query_string'].decode().split('token=')[-1]
+            self.user = await GlobalChatConsumer.get_user_from_token(self, token) 
+            
+            if not self.user:
+                await self.close()
+                return
+
+            self.company = await self.get_company_from_user(self.user)
+            if not self.company:
+                await self.close()
+                return
+
+            await self.channel_layer.group_add(self.room_group_name, self.channel_name)
+            await self.accept()
+            await self.send(text_data=json.dumps({"message": "Welcome to test chat with AI !"}))
+        except Exception as e:
+            print(f"Connection Error: {e}")
+            await self.close()
 
     async def disconnect(self, close_code): 
         await self.channel_layer.group_discard(self.room_group_name, self.channel_name)
@@ -463,6 +476,8 @@ class TestChatConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def save_message(self, text, msg_type):
+        if not self.company:
+            return
         TestChat.objects.create(
             company=self.company,
             type=msg_type,
@@ -474,6 +489,9 @@ class TestChatConsumer(AsyncWebsocketConsumer):
         from asgiref.sync import sync_to_async
         from Socials.helper import check_msg_limit
 
+        if not self.company:
+             return {"content": "Company not found."}
+
         # Check Daily Message Limit
         if not await sync_to_async(check_msg_limit)(self.company.id):
             return {"content": "Daily AI response limit reached. Bot has been deactivated."}
@@ -483,6 +501,11 @@ class TestChatConsumer(AsyncWebsocketConsumer):
     
     @database_sync_to_async
     def get_company_from_user(self, user):
-        if user.role == 'employee':
-            return Employee.objects.get(email=user.email).company
+        if not user:
+            return None
+        if getattr(user, 'role', '') == 'employee':
+            try:
+                return Employee.objects.get(email=user.email).company
+            except Employee.DoesNotExist:
+                return None
         return Company.objects.filter(user=user).first()

@@ -6,6 +6,11 @@ User = get_user_model()
 
 # Create your models here.
 
+MESSAGE_TYPE = [
+    ('incoming', 'Incoming'),
+    ('outgoing', 'Outgoing'),
+]
+
 class ChatProfile(models.Model):
     PLATFORM_CHOICES = [
         ('whatsapp', 'WhatsApp'),
@@ -69,11 +74,6 @@ class ChatRoom(models.Model):
 
 
 class ChatMessage(models.Model):
-    MESSAGE_TYPE = [
-        ('incoming', 'Incoming'),
-        ('outgoing', 'Outgoing'),
-    ]
-
     room = models.ForeignKey(ChatRoom, related_name='messages', on_delete=models.CASCADE)
     type = models.CharField(max_length=10, choices=MESSAGE_TYPE)
     text = models.TextField()
@@ -92,7 +92,7 @@ class ChatMessage(models.Model):
 
 class TestChat(models.Model):
     company = models.ForeignKey('Accounts.Company', related_name='test_chats', on_delete=models.CASCADE)
-    type = models.CharField(max_length=10, choices=ChatMessage.MESSAGE_TYPE)
+    type = models.CharField(max_length=10, choices=MESSAGE_TYPE)
     text = models.TextField()
     processed = models.BooleanField(default=False)
     timestamp = models.DateTimeField(auto_now_add=True)
