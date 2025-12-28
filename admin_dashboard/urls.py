@@ -19,4 +19,7 @@ urlpatterns = [
     path('subscription-plan/', views.SubscriptionPlanListView.as_view(), name='subscription-plan-list'),
     path('subscription-plan/<int:id>/', views.SubscriptionPlanUpdateView.as_view(), name='subscription-plan-detail'),
     path('create-custom-plan/', views.CreateCustomPlanView.as_view(), name='create-custom-plan'),
+    path('user-plan-requests/', views.UserPlanRequestListView.as_view(), name='user-plan-requests'),
+    path('request-custom-plan/', views.RequestCustomPlanView.as_view(), name='request-custom-plan'),
+    path('approve-user-plan/', views.ApproveUserPlanRequestView.as_view(), name='approve-user-plan'),
 ]
