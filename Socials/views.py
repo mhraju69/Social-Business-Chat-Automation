@@ -367,5 +367,20 @@ class GetOldMessage(APIView):
         except ChatRoom.DoesNotExist:
             return Response({"error": "Room not found"}, status=404)
         
+class GetTestChatOldMessage(APIView):
+    permission_classes = [IsAuthenticated]
+    def get(self, request):
+        target_user = get_company_user(request.user)
+        if not target_user:
+            return Response({"error": "User not found (company user)"}, status=404)
 
+        try:
+            company = target_user.company
+        except Exception:
+            return Response({"error": "Company not found"}, status=404)
 
+        messages = TestChat.objects.filter(company=company).order_by('-timestamp')[:50]
+        # Reverse to show oldest first in the list if that is desired, or keep as is.
+        # Use [::-1] as in GetOldMessage to likely match frontend expectation (chronological order)
+        serializer = TestChatSerializer(messages[::-1], many=True)
+        return Response(serializer.data)

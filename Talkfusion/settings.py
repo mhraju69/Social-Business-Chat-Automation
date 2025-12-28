@@ -24,7 +24,7 @@ load_dotenv()  # Load environment variables from .env file
 AI_TOKEN = os.getenv('AI_TOKEN')
 FB_APP_ID = os.getenv('FB_APP_ID')
 FB_APP_SECRET = os.getenv('FB_APP_SECRET')
-FIELD_ENCRYPTION_KEY = os.getenv('FIELD_ENCRYPTION_KEY').encode()
+FIELD_ENCRYPTION_KEY = (os.getenv('FIELD_ENCRYPTION_KEY') or 'default_dummy_key').encode()
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY")
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY")
 STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")

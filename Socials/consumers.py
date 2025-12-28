@@ -438,19 +438,37 @@ class TestChatConsumer(AsyncWebsocketConsumer):
                 await self.send(text_data=json.dumps({"error": "No message received."}))
                 return
 
+            # Save incoming message
+            await self.save_message(user_message, 'incoming')
+
             # Send typing event (optional)
             await self.send(text_data=json.dumps({"status": "typing"}))
 
             # Run AI in background
             response = await self.get_ai_response(user_message)
+            
+            ai_message = response.get('content', "Sorry, I couldn't generate a response.")
+
+            # Save outgoing (AI) message
+            await self.save_message(ai_message, 'outgoing')
 
             await self.send(text_data=json.dumps({
                 "sender": "ai",
-                "message": response.get('content', "Sorry, I couldn't generate a response.")
+                "message": ai_message
             }))
 
         except Exception as e:
+            print(f"Error in TestChat: {e}")
             await self.send(text_data=json.dumps({"error": str(e)}))
+
+    @database_sync_to_async
+    def save_message(self, text, msg_type):
+        TestChat.objects.create(
+            company=self.company,
+            type=msg_type,
+            text=text,
+            processed=True
+        )
 
     async def get_ai_response(self, user_message):
         from asgiref.sync import sync_to_async

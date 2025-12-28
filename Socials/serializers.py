@@ -11,3 +11,8 @@ class ChatMessageSerializer(ModelSerializer):
     class Meta:
         model = ChatMessage
         fields = '__all__'
+
+class TestChatSerializer(ModelSerializer):
+    class Meta:
+        model = TestChat
+        fields = '__all__'
