@@ -692,7 +692,7 @@ class ApproveUserPlanRequestView(generics.GenericAPIView):
             plan_request.save()
 
             company = plan_request.user.company
-            session = create_stripe_checkout_for_subscription(company, custom_plan.id)
+            session = create_stripe_checkout_for_subscription(company.id, custom_plan.id)
             send_mail(
                 'Custom Plan Approved',
                 f'Your custom plan request has been approved. Please proceed to payment using the following link: {session.url}',
@@ -703,4 +703,47 @@ class ApproveUserPlanRequestView(generics.GenericAPIView):
             return Response({"message": "Plan request approved successfully."}, status=200)
         except UserPlanRequest.DoesNotExist:
             return Response({"error": "Plan request not found or already approved."}, status=400)
+
+    @extend_schema(
+        tags=["Admin Dashboard"],
+        summary="Delete a user plan request",
+    )
+
+    def delete(self, request, *args, **kwargs):
+        request_id = request.data.get("id")
+
+        if not request_id:
+            return Response(
+                {"error": "Request id is required."},
+                status=400
+            )
+
+        try:
+            plan_request = UserPlanRequest.objects.get(id=request_id)
+
+            # Optional: prevent deleting approved requests
+            if plan_request.is_approved:
+                return Response(
+                    {"error": "Approved plan requests cannot be deleted."},
+                    status=400
+                )
+
+            plan_request.delete()
+            send_mail(
+                'User Plan Request Deleted',
+                f'Your user plan request has been diclined by admin.',
+                settings.DEFAULT_FROM_EMAIL,
+                [plan_request.user.email],
+                fail_silently=True,
+            )
+            return Response(
+                {"message": "User plan request deleted successfully."},
+                status=200
+            )
+
+        except UserPlanRequest.DoesNotExist:
+            return Response(
+                {"error": "User plan request not found."},
+                status=400
+            )
 

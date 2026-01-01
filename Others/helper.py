@@ -260,7 +260,7 @@ def create_booking(request,company_id,data=None):
     number = data.get('number')
     
     # Get timezone from params (e.g., "Asia/Dhaka" or "+06:00")
-    timezone_str = request.query_params.get('timezone') or data.get('timezone') or 'UTC'
+    timezone_str = request.query_params.get('timezone') or company.timezone
     
     try:
         # Try to parse as timezone name first (e.g., "Asia/Dhaka")
@@ -269,9 +269,11 @@ def create_booking(request,company_id,data=None):
         user_tz = pytz.UTC
     
     # Calculate UTC times for Google Calendar
-    calendar_start_utc = None
-    calendar_end_utc = None
-    
+    start_dt = None
+    end_dt = None
+    start_utc = None
+    end_utc = None
+
     if 'start_time' in data:
         start_time_local = data['start_time']
         
@@ -280,16 +282,28 @@ def create_booking(request,company_id,data=None):
             try:
                 start_dt = datetime.strptime(start_time_local, "%Y-%m-%d %H:%M:%S")
             except ValueError:
-                # Try alternate format if needed, or let serializer handle validation later
-                start_dt = datetime.strptime(start_time_local, "%Y-%m-%dT%H:%M:%S")
+                # Try alternate format if needed
+                try:
+                    start_dt = datetime.strptime(start_time_local, "%Y-%m-%dT%H:%M:%S")
+                except ValueError:
+                     pass
         else:
             start_dt = start_time_local
         
-        # Localize to user timezone and convert to UTC for Calendar
-        start_aware = user_tz.localize(start_dt)
-        calendar_start_utc = start_aware.astimezone(pytz.UTC)
-        
-        # Note: We do NOT update data['start_time'] so DB saves the raw input (as UTC/Naive)
+        if start_dt:
+            # Localize to user timezone and convert to UTC
+            # Assuming input is naive local time
+            if timezone.is_naive(start_dt):
+                start_aware = user_tz.localize(start_dt)
+            else:
+                start_aware = start_dt.astimezone(user_tz)
+                
+            start_utc = start_aware.astimezone(pytz.UTC)
+            
+            # Update data with UTC time for DB saving
+            data['start_time'] = start_utc
+            calendar_start_utc = start_utc
+            
     
     if 'end_time' in data:
         end_time_local = data['end_time']
@@ -298,14 +312,43 @@ def create_booking(request,company_id,data=None):
             try:
                 end_dt = datetime.strptime(end_time_local, "%Y-%m-%d %H:%M:%S")
             except ValueError:
-                end_dt = datetime.strptime(end_time_local, "%Y-%m-%dT%H:%M:%S")
+                try:
+                    end_dt = datetime.strptime(end_time_local, "%Y-%m-%dT%H:%M:%S")
+                except ValueError:
+                    pass
         else:
             end_dt = end_time_local
         
-        end_aware = user_tz.localize(end_dt)
-        calendar_end_utc = end_aware.astimezone(pytz.UTC)
+        if end_dt:
+            if timezone.is_naive(end_dt):
+                end_aware = user_tz.localize(end_dt)
+            else:
+                end_aware = end_dt.astimezone(user_tz)
+            
+            end_utc = end_aware.astimezone(pytz.UTC)
+            
+            # Update data with UTC time for DB saving
+            data['end_time'] = end_utc
+            calendar_end_utc = end_utc
+
+    # Check concurrent booking limit using UTC times (since DB is in UTC)
+    if start_utc and end_utc:
+        from .models import Booking
+        # Check specific overlap: (StartA < EndB) and (EndA > StartB)
+        current_bookings_count = Booking.objects.filter(
+            company=company,
+            start_time__lt=end_utc, 
+            end_time__gt=start_utc
+        ).count()
+        
+        if current_bookings_count >= company.concurrent_booking_limit:
+            return Response(
+                {"error": "Slot is already booked. Maximum concurrent bookings reached."}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
     
     # Create booking
+    # Data now contains UTC times
     serializer = BookingSerializer(data=data)
     serializer.is_valid(raise_exception=True)
     booking = serializer.save(company=company)

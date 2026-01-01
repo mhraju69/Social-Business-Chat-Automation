@@ -47,6 +47,13 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     'https://wahejan.vercel.app'
 ]
+CORS_ALLOWED_ALL_ORIGINS = True
+
+from corsheaders.defaults import default_headers
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "x-client-info",
+]
 DEBUG = True
 #DEBUG = False
 # Application definition

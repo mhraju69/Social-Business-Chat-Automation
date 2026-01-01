@@ -83,10 +83,12 @@ class LoginSerializer(serializers.Serializer):
         session = generate_session(request, user, access)
 
         employee = Employee.objects.filter(email__iexact=user.email).first()
+        plan = Subscriptions.objects.filter(company=get_company(user)).first()
         return {
             "user": UserSerializer(user).data,
             "role": employee.roles if employee else None,
             "session_id": session.id,
+            "plan": True if plan else False,
             "refresh": str(refresh),
             "access": str(access),  # Use the same access token, not a new one!
         }

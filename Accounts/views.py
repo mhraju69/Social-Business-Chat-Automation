@@ -147,6 +147,14 @@ class CompanyDetailUpdateView(generics.RetrieveUpdateAPIView):
             raise NotFound("No company found for this user.")
         return company
     
+    def perform_update(self, serializer):
+        tz = get_user_timezone(self.request)
+        print(f"DEBUG: perform_update tz={tz}")
+        if tz:
+            serializer.save(timezone=tz)
+        else:
+            serializer.save()
+
 class ServiceListCreateView(generics.ListCreateAPIView):
     serializer_class = ServiceSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -406,10 +414,10 @@ class SocialAuthCallbackView(APIView):
             serializer = UserSerializer(user)
             access = refresh.access_token
             refresh = refresh
-            
+            plan = Subscriptions.objects.filter(company=get_company(user)).first()
             session = generate_session(request, user, access)   
             employee = Employee.objects.filter(email__iexact=user.email).first()
-            return Response({"user": serializer.data, "access": str(access), "refresh": str(refresh), "session_id": session.id,"role": employee.roles if employee else None})
+            return Response({"user": serializer.data, "access": str(access), "refresh": str(refresh), "plan": True if plan else False, "session_id": session.id,"role": employee.roles if employee else None})
 
         except Exception as e:
             # print full error

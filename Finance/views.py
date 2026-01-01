@@ -27,7 +27,7 @@ class GetPlans(APIView):
     serializer_class = PlanSerializers
 
     def get(self, request):
-        plans = Plan.objects.all()  
+        plans = Plan.objects.filter(custom=False)  
         serializer = self.serializer_class(plans, many=True)  
         return Response(serializer.data)
     

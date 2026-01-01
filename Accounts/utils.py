@@ -29,6 +29,8 @@ def send_otp(email, task=None):
     # Generate new OTP
     otp = OTP.generate_otp(user)
 
+    print(otp.otp)
+
     subject = "OTP Verification"
 
     # Render HTML template (templates/email/otp_email.html)
@@ -143,6 +145,38 @@ def get_location(ip):
         return f"{response['city']}, {response['country']}"
     except:
         return "Unknown"
+
+def get_user_timezone(request):
+    try:
+        ip = get_client_ip(request)
+
+        is_private = False
+        if ip in ['127.0.0.1', 'localhost', '::1']:
+            is_private = True
+        elif ip.startswith(('10.', '192.168.')):
+            is_private = True
+        elif ip.startswith('172.'):
+            try:
+                second_octet = int(ip.split('.')[1])
+                if 16 <= second_octet <= 31:
+                    is_private = True
+            except:
+                pass
+
+        if is_private:
+            url = "http://ip-api.com/json/"
+        else:
+            url = f"http://ip-api.com/json/{ip}"
+            
+        response = requests.get(url).json()
+        if response.get('status') == 'fail':
+            return None
+            
+        tz = response.get("timezone")
+        return tz
+        
+    except Exception as e:
+        return None
         
 def check_plan(company):
     plan = Subscriptions.objects.filter(company=company).first()
@@ -243,3 +277,10 @@ def generate_session(request, user, access):
 
 
     return session
+
+def get_company(user):
+    if user.role == 'employee':
+        employee = Employee.objects.filter(email__iexact=user.email).first()
+        return employee.company if employee else None
+    return Company.objects.filter(user=user).first()
+

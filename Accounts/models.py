@@ -72,8 +72,6 @@ class User(AbstractBaseUser, PermissionsMixin):
     def is_employee(self):
         return self.role == 'employee'
 
-    history = HistoricalRecords()
-
 class Company(models.Model):
     user = models.OneToOneField(User, related_name='company',on_delete=models.CASCADE)
     name = models.CharField(max_length=255)
@@ -87,7 +85,7 @@ class Company(models.Model):
     address = models.CharField(max_length=255, blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
     country = models.CharField(max_length=100, blank=True, null=True)
-
+    timezone = models.CharField(max_length=50, default='UTC')
     language = models.CharField(max_length=50, default='English')
 
     # AI training
@@ -95,6 +93,7 @@ class Company(models.Model):
 
     # Website link
     website = models.CharField(max_length=255, blank=True, null=True)
+    concurrent_booking_limit = models.IntegerField(default=1)
 
     # Company summary
     summary = models.TextField(blank=True, null=True)

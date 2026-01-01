@@ -48,8 +48,8 @@ def create_stripe_checkout_for_service(
     stripe_client.api_key = api_key
 
     # Success/cancel URLs
-    success_url = "https://www.youtube.com"
-    cancel_url = "https://www.facebook.com"
+    success_url = f"{settings.FRONTEND_URL}/user/settings"
+    cancel_url = f"{settings.FRONTEND_URL}/user/settings"
 
     # ---------------- METADATA ----------------
     metadata = {
@@ -175,8 +175,8 @@ def create_stripe_checkout_for_subscription(
         "payment_method_types": ["card"],
         "line_items": [{"price": plan.stripe_price_id, "quantity": 1}],
         "mode": "subscription", # Changed from 'payment' to 'subscription'
-        "success_url": "https://dashboard.talkfusion.ai/finance/success", # Update with your real URLs
-        "cancel_url": "https://dashboard.talkfusion.ai/finance/cancel",
+        "success_url": f"{settings.FRONTEND_URL}/user/settings", # Update with your real URLs
+        "cancel_url": f"{settings.FRONTEND_URL}/user/settings",
         "metadata": metadata,
         "subscription_data": {
             "metadata": metadata,
