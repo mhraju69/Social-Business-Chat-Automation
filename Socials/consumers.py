@@ -52,7 +52,7 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
 
                         
             }))
-
+            print(f"✅Websocket Connection Established")
         except Exception as e:
             print(f"❌ Connection Error: {e}")
             await self.close()

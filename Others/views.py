@@ -17,7 +17,7 @@ from django.db.models import Sum,Count
 from Accounts.permissions import *
 from .helper import *
 import urllib.parse
-from django.shortcuts import render
+from django.shortcuts import render,redirect
 from Ai.tasks import sync_company_knowledge_task
 from Ai.data_analysis import analyze_company_data
 from Accounts.utils import get_company_user
@@ -35,6 +35,9 @@ class ClientBookingView(APIView):
             
         booking = create_booking(request,company.id)
         
+        if isinstance(booking, Response):
+            return booking
+
         return Response(
             BookingSerializer(booking).data, 
             status=status.HTTP_201_CREATED
@@ -1286,3 +1289,21 @@ class SyncKnowledgeView(APIView):
                 {"error": f"Failed to start sync: {str(e)}"}, 
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+class PaymentSuccessView(APIView):
+    permission_classes = [permissions.AllowAny]
+    
+    def get(self, request):
+        payment_id = request.GET.get('payment_id')
+        from Finance.models import Payment
+        payment = Payment.objects.get(id=payment_id)
+        if not payment:
+            return Response({"error": "Payment not found"}, status=status.HTTP_404_NOT_FOUND)
+        invoice = payment.invoice_url
+        return redirect(invoice)
+
+class PaymentCancelView(APIView):
+    permission_classes = [permissions.AllowAny]
+    
+    def get(self, request):
+        return render(request, 'payment_cancel.html')

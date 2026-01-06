@@ -25,6 +25,7 @@ def unified_webhook(request, platform):
     elif request.method == "POST":
         try:
             data = json.loads(request.body.decode("utf-8"))
+            print(f"🚀 [{platform}] Webhook connected successfully")
 
             #---------------------------------------------
             # PLATFORM SPECIFIC DATA PARSING

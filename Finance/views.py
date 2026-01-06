@@ -168,16 +168,62 @@ def stripe_webhook(request):
                     
                     logger.info(f"✅ Subscription {subscription_id} activated for company {company_id}")
 
-                # Create a Payment record for the initial charge
-                Payment.objects.create(
-                    company=company,
-                    type="subscriptions" if mode == 'subscription' else "services",
-                    amount=Decimal(session.get('amount_total', 0)) / 100,
-                    status="success",
-                    transaction_id=session.get('payment_intent') or session.get('id'),
-                    reason=f"Initial Subscription: {plan.name}" if mode == 'subscription' else "Service Payment",
-                    payment_date=timezone.now()
-                )
+                # Check if we have an existing payment (e.g. for services)
+                payment_id = metadata.get('payment_id')
+                existing_payment = None
+                
+                if payment_id:
+                    existing_payment = Payment.objects.filter(id=payment_id).first()
+                
+                # Fetch Invoice URL and robust transaction ID
+                invoice_id = session.get('invoice')
+                invoice_url = None
+                payment_intent = session.get('payment_intent')
+
+                if invoice_id:
+                    try:
+                        inv = stripe.Invoice.retrieve(invoice_id)
+                        invoice_url = inv.get('hosted_invoice_url')
+                        if not payment_intent:
+                            payment_intent = inv.get('payment_intent')
+                    except Exception as e:
+                        logger.error(f"Error fetching invoice {invoice_id}: {e}")
+                
+                final_txn_id = payment_intent or session.get('id')
+
+                # Get Client Email
+                client_email = session.get('customer_details', {}).get('email')
+                if not client_email:
+                    client_email = metadata.get('email')
+                if not client_email and company:
+                    client_email = company.user.email
+                    
+                # Get Session URL (Checkout URL)
+                session_url = session.get('url')
+
+                if existing_payment:
+                    existing_payment.status = "success"
+                    existing_payment.transaction_id = final_txn_id
+                    existing_payment.invoice_url = invoice_url
+                    if client_email:
+                         existing_payment.client = client_email
+                    if session_url and not existing_payment.url:
+                         existing_payment.url = session_url
+                    existing_payment.save()
+                else:
+                    # Create a Payment record for the initial charge
+                    Payment.objects.create(
+                        company=company,
+                        client=client_email,
+                        type="subscriptions" if mode == 'subscription' else "services",
+                        amount=Decimal(session.get('amount_total', 0)) / 100,
+                        status="success",
+                        transaction_id=final_txn_id,
+                        invoice_url=invoice_url,
+                        url=session_url,
+                        reason=f"Initial Subscription: {plan.name}" if mode == 'subscription' else "Service Payment",
+                        payment_date=timezone.now()
+                    )
 
         except Exception as e:
             logger.error(f"Error processing checkout.session.completed: {e}")

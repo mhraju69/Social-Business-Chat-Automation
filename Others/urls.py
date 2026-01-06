@@ -10,7 +10,7 @@ urlpatterns = [
     path('get-otp/', GetOtp.as_view()),
     path('login/', LoginView.as_view(), name='login'),
     path('verify-otp/',VerifyOTP.as_view(), name="verify_otp"),
-    path('dashboard/', DashboardView.as_view()),
+    path('dashboard/', DashboardView.as_view()),    
     path('booking/', ClientBookingView.as_view()),  
     path("google/calendar/connect/", ConnectGoogleCalendarView.as_view()),
     path("google/calendar/callback/", GoogleOAuthCallbackView.as_view()),
@@ -29,4 +29,5 @@ urlpatterns = [
     path('validate-token/', ValidateTokenView.as_view(), name='validate-token'),
     path('knowledge-category/', KnowledgeCategoryView.as_view()),
     path('sync-knowledge/', SyncKnowledgeView.as_view()),
+    path('payment-success/', PaymentSuccessView.as_view(), name='payment-success'),
 ]

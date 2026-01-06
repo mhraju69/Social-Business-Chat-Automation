@@ -48,8 +48,8 @@ def create_stripe_checkout_for_service(
     stripe_client.api_key = api_key
 
     # Success/cancel URLs
-    success_url = f"{settings.FRONTEND_URL}/user/settings"
-    cancel_url = f"{settings.FRONTEND_URL}/user/settings"
+    success_url = f"https://ape-in-eft.ngrok-free.app/api/payment-success/?payment_id={payment.id}"
+    cancel_url = f"https://ape-in-eft.ngrok-free.app/payment-cancel/"
 
     # ---------------- METADATA ----------------
     metadata = {
@@ -121,8 +121,20 @@ def create_stripe_checkout_for_subscription(
 
     stripe_client.api_key = api_key
 
+    # ---------------- CREATE PENDING PAYMENT RECORD ----------------
+    # Create payment first to generate ID for success_url and metadata
+    payment = Payment.objects.create(
+        company=company,
+        client=company.user.email,
+        type="subscriptions",
+        amount=plan.price,
+        reason=f"Subscription: {plan.get_name_display()}",
+        status="pending",
+    )
+
     # ---------------- METADATA ----------------
     metadata = {
+        "payment_id": str(payment.id),
         "company_id": str(company.id),
         "type": "subscriptions",
         "plan_id": str(plan_id),
@@ -170,13 +182,17 @@ def create_stripe_checkout_for_subscription(
         except Exception as e:
             raise ValueError(f"Failed to setup Stripe Price: {str(e)}")
 
+    # Success/cancel URLs
+    success_url = f"https://ape-in-eft.ngrok-free.app/api/payment-success/?payment_id={payment.id}"
+    cancel_url = f"https://ape-in-eft.ngrok-free.app/payment-cancel/"
+
     # ---------------- CREATE STRIPE CHECKOUT ----------------
     checkout_args = {
         "payment_method_types": ["card"],
         "line_items": [{"price": plan.stripe_price_id, "quantity": 1}],
         "mode": "subscription", # Changed from 'payment' to 'subscription'
-        "success_url": f"{settings.FRONTEND_URL}/user/settings", # Update with your real URLs
-        "cancel_url": f"{settings.FRONTEND_URL}/user/settings",
+        "success_url": success_url, # Update with your real URLs
+        "cancel_url": cancel_url,
         "metadata": metadata,
         "subscription_data": {
             "metadata": metadata,
@@ -185,6 +201,10 @@ def create_stripe_checkout_for_subscription(
     }
 
     session = stripe_client.checkout.Session.create(**checkout_args)
+
+    # Save Stripe session URL in Payment
+    payment.url = session.url
+    payment.save()
 
     return session
 
