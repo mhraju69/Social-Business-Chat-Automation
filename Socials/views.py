@@ -1,5 +1,6 @@
-from django.shortcuts import render,HttpResponse
+from django.shortcuts import render
 import requests
+from django.urls import reverse
 from django.http import JsonResponse
 from django.conf import settings
 from .models import *
@@ -159,22 +160,7 @@ def facebook_callback(request):
                 "platform": "facebook",
             }
         )
-
-        subscription_success = subscribe_page_to_webhook(page_id, long_lived_token)
         
-        subscription_status = check_page_subscription(page_id, long_lived_token)
-
-        saved_pages.append({
-            "id": page_id,
-            "name": page_name,
-            "subscribed": subscription_success
-        })
-        subscription_results.append({
-            "page": page_name,
-            "subscription_success": subscription_success,
-            "subscription_status": subscription_status
-        })
-        break
     if _from == "app":
         return render(request,'redirect.html')
     else:
@@ -301,7 +287,6 @@ def instagram_callback(request):
                 },
             )
             profile_created = True
-            break # Stop after finding and connecting the first valid Instagram account
         
         # If no insta_account, just continue to next page
     
@@ -468,7 +453,6 @@ def whatsapp_callback(request):
         })
         
         # For now, only save the first phone number
-        break
     
     if _from == "app":
         return render(request, 'redirect.html')
@@ -542,3 +526,16 @@ class GetTestChatOldMessage(APIView):
         # Use [::-1] as in GetOldMessage to likely match frontend expectation (chronological order)
         serializer = TestChatSerializer(messages[::-1], many=True)
         return Response(serializer.data)
+
+class SubscribeFacebookPageToWebhook(views.APIView):
+    def post(self,request,*args,**kwargs):
+        profile = ChatProfile.objects.filter(id=kwargs.get("profile_id")).first()
+        if not profile:
+            return Response({"error": "Profile not found"}, status=404)
+        
+        subscribe = subscribe_page_to_webhook(profile.page_id, profile.access_token)
+
+        if not subscribe:
+            return Response({"error": "Failed to subscribe page to webhook"}, status=500)
+        
+        return Response({"success": "Page subscribed to webhook"}, status=200)

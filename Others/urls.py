@@ -13,7 +13,7 @@ urlpatterns = [
     path('dashboard/', DashboardView.as_view()),    
     path('booking/', ClientBookingView.as_view()),  
     path("google/calendar/connect/", ConnectGoogleCalendarView.as_view()),
-    path("google/calendar/callback/", GoogleOAuthCallbackView.as_view()),
+    path("google/calendar/callback/", GoogleOAuthCallbackView.as_view(), name="google_calendar_callback"),
     path('analytics/', AnalyticsView.as_view(), name='analytics'),
     path('log/', UserActivityLogView.as_view(), name='user-activity-log'),
     path('opening-hours/', OpeningHoursCreateView.as_view(), name='opening-hours-create'),

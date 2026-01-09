@@ -37,6 +37,10 @@ SECRET_KEY = 'django-insecure-7#$m=&$%3a_op)s4yr7qy2+424rs4#)2xi%9nj$in&0-*xqdmf
 
 # SECURITY WARNING: don't run with debug turned on in production!
 ALLOWED_HOSTS = ['*']
+
+# This ensures build_absolute_uri() uses https when behind a proxy like ngrok
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 # settings.py
 CSRF_TRUSTED_ORIGINS = [
     "https://ape-in-eft.ngrok-free.app",
