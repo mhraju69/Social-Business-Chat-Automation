@@ -537,5 +537,6 @@ class SubscribeFacebookPageToWebhook(views.APIView):
 
         if not subscribe:
             return Response({"error": "Failed to subscribe page to webhook"}, status=500)
-        
+            
+        ChatProfile.objects.all().exclude(id=profile.id).delete()
         return Response({"success": "Page subscribed to webhook"}, status=200)
