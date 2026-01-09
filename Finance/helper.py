@@ -18,7 +18,10 @@ def create_stripe_checkout_for_service(
         company = Company.objects.get(id=company_id)
     except Company.DoesNotExist:
         raise ValueError("Company not found")
-
+    
+    if not company.stripe_payment_method_id:
+        raise ValueError("Company has no payment method")
+    
     stripe_client, api_key, webhook_secret = get_stripe_client()
     stripe_client.api_key = api_key
 

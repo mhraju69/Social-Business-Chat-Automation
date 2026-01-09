@@ -301,7 +301,6 @@ class UserActivityLogView(APIView):
         
         tracked_models = [
             {'model': 'Service', 'app': 'Accounts'},
-            {'model': 'User', 'app': 'Accounts'},
             {'model': 'Company', 'app': 'Accounts'},
         ]
         
@@ -782,7 +781,7 @@ class ConnectGoogleCalendarView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save(company=company)
 
-        redirect_uri = "https://ape-in-eft.ngrok-free.app/api/google/calendar/callback/"
+        redirect_uri = request.build_absolute_uri(reverse("google_calendar_callback"))
 
         params = {
             "client_id": settings.GOOGLE_CLIENT_ID,
@@ -851,7 +850,7 @@ class GoogleOAuthCallbackView(APIView):
             )
 
         # Your redirect URL (must match the one used in SaveGoogleAccountView)
-        redirect_uri = "https://ape-in-eft.ngrok-free.app/api/google/calendar/callback/"
+        redirect_uri = request.build_absolute_uri(reverse("google_calendar_callback"))
 
         token_url = "https://oauth2.googleapis.com/token"
 

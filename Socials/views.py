@@ -27,7 +27,7 @@ class FacebookConnectView(APIView):
 
     def get(self, request):
         fb_app_id = settings.FB_APP_ID
-        redirect_uri = "https://ape-in-eft.ngrok-free.app/facebook/callback/"
+        redirect_uri = request.build_absolute_uri(reverse("facebook_callback"))
         
         # ✅ Added pages_messaging permission
         scope = "pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging"
@@ -178,7 +178,7 @@ def facebook_callback(request):
     if _from == "app":
         return render(request,'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
+        return redirect(f"{settings.FRONTEND_URL}/user/policy")
 
 class InstagramConnectView(APIView):
     # permission_classes = [AllowAny]
@@ -186,7 +186,7 @@ class InstagramConnectView(APIView):
 
     def get(self, request):
         fb_app_id = settings.FB_APP_ID
-        redirect_uri = "https://ape-in-eft.ngrok-free.app/instagram/callback/"
+        redirect_uri = request.build_absolute_uri(reverse("instagram_callback"))
         scope = "instagram_basic,instagram_manage_messages,pages_show_list,pages_manage_metadata"
         target_user = get_company_user(request.user)
         state = target_user.id if target_user else request.user.id 
@@ -315,7 +315,7 @@ def instagram_callback(request):
     if _from == "app":
         return render(request,'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
+        return redirect(f"{settings.FRONTEND_URL}/user/policy")
 
 class ConnectWhatsappView(APIView):
     permission_classes = [IsAuthenticated]
@@ -330,9 +330,9 @@ class ConnectWhatsappView(APIView):
             return Response({"error": "Company not found"}, status=404)
     
         state = target_user.id
-        whatsapp_redirect_uri = "https://ape-in-eft.ngrok-free.app/whatsapp/callback/"
+        redirect_url = request.build_absolute_uri(reverse("whatsapp_callback"))
 
-        redirect_url = f"https://www.facebook.com/v19.0/dialog/oauth?client_id={settings.FB_APP_ID}&redirect_uri={whatsapp_redirect_uri}&state={state},{request.query_params.get('from','web')}&response_type=code&config_id={settings.WHATSAPP_CONFIG_ID}"
+        redirect_url = f"https://www.facebook.com/v19.0/dialog/oauth?client_id={settings.FB_APP_ID}&redirect_uri={redirect_url}&state={state},{request.query_params.get('from','web')}&response_type=code&config_id={settings.WHATSAPP_CONFIG_ID}"
         
         return Response({"redirect_url": redirect_url})
 
@@ -473,7 +473,7 @@ def whatsapp_callback(request):
     if _from == "app":
         return render(request, 'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
+        return redirect(f"{settings.FRONTEND_URL}/user/policy")
     
 
 class ChatProfileView(RetrieveUpdateAPIView):

@@ -101,13 +101,13 @@ def start_stripe_connect(request):
 @permission_classes([AllowAny])
 def stripe_connect_success(request):
     """Handle successful onboarding redirect."""
-    return Response({"message": "Successfully connected Stripe account. You can now receive payments."}, status=200)
+    return redirect(f"{settings.FRONTEND_URL}/user/settings")
 
 @api_view(["GET"])
 @permission_classes([AllowAny])
 def stripe_connect_refresh(request):
     """Handle onboarding session refresh/retry."""
-    return Response({"message": "The onboarding session expired. Please try again from your dashboard."}, status=400)
+    return HttpResponse("The onboarding session expired. Please try again from your dashboard.", status=400)
 
 @csrf_exempt
 def stripe_webhook(request):
