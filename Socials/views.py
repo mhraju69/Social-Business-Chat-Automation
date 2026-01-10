@@ -472,10 +472,27 @@ class ChatProfileView(RetrieveUpdateAPIView):
              raise NotFound("Company user not found.")
         
         try:
-            return ChatProfile.objects.get(user=target_user, platform=platform)
+            return ChatProfile.objects.filter(user=target_user, platform=platform).first()
         except ChatProfile.DoesNotExist:
             raise NotFound(detail=f"ChatProfile with platform '{platform}' not found.")
  
+class ChatProfileListView(ListAPIView):
+    permission_classes = [IsAuthenticated]
+    serializer_class = ChatProfileSerializers
+
+    def get_queryset(self):
+        platform = self.request.query_params.get("platform") or self.request.data.get("platform") or "facebook"
+        
+        target_user = get_company_user(self.request.user)
+        if not target_user:
+             raise NotFound("Company user not found.")
+        
+        try:
+            return ChatProfile.objects.filter(user=target_user, platform=platform)
+        except ChatProfile.DoesNotExist:
+            raise NotFound(detail=f"ChatProfile with platform '{platform}' not found.")
+
+
 class CommonAskedLeaderboard(APIView):
     def get(self, request):
         target_user = get_company_user(request.user)
@@ -529,11 +546,11 @@ class GetTestChatOldMessage(APIView):
 
 class SubscribeFacebookPageToWebhook(views.APIView):
     def post(self,request,*args,**kwargs):
-        profile = ChatProfile.objects.filter(id=kwargs.get("profile_id")).first()
+        profile = ChatProfile.objects.filter(id=request.query_params.get("profile_id")).first()
         if not profile:
             return Response({"error": "Profile not found"}, status=404)
         
-        subscribe = subscribe_page_to_webhook(profile.page_id, profile.access_token)
+        subscribe = subscribe_page_to_webhook(profile.profile_id, profile.access_token)
 
         if not subscribe:
             return Response({"error": "Failed to subscribe page to webhook"}, status=500)

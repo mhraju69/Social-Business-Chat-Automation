@@ -4,8 +4,8 @@ from .models import *
 class ChatProfileSerializers(ModelSerializer):
     class Meta:
         model = ChatProfile
-        fields = ['bot_active']
-        read_only_fields = ["user","platform"]
+        fields = ['id', 'bot_active', 'profile_id', 'name', 'platform']
+        read_only_fields = ["platform"]
 
 class ChatMessageSerializer(ModelSerializer):
     class Meta:
