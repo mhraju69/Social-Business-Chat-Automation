@@ -164,7 +164,7 @@ def facebook_callback(request):
     if _from == "app":
         return render(request,'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/policy")
+        return redirect(f"{settings.FRONTEND_URL}/user/chat-profile")
 
 class InstagramConnectView(APIView):
     # permission_classes = [AllowAny]
