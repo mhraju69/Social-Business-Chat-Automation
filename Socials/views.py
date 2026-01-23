@@ -102,24 +102,45 @@ def facebook_callback(request):
         return JsonResponse({"error": "Missing code parameter"})
 
     token_url = "https://graph.facebook.com/v20.0/oauth/access_token"
+    # Dynamic redirect_uri to match the one sent in ConnectView
+    redirect_uri = request.build_absolute_uri(reverse("facebook_callback")).split('?')[0]
+    
     params = {
         "client_id": settings.FB_APP_ID,
-        "redirect_uri": "https://ape-in-eft.ngrok-free.app/facebook/callback/",
+        "redirect_uri": redirect_uri,
         "client_secret": settings.FB_APP_SECRET,
         "code": code,
     }
     
     resp = requests.get(token_url, params=params)
     data = resp.json()
+
+    # print("😏😏😏Facebook callback response:",data)
     
     if "access_token" not in data:
         return JsonResponse({"error": "Token exchange failed", "details": data})
 
     user_access_token = data["access_token"]
 
+    # 1. Exchange short-lived User Access Token for Long-lived User Access Token
+    exchange_url = "https://graph.facebook.com/v20.0/oauth/access_token"
+    exchange_params = {
+        "grant_type": "fb_exchange_token",
+        "client_id": settings.FB_APP_ID,
+        "client_secret": settings.FB_APP_SECRET,
+        "fb_exchange_token": user_access_token,
+    }
+    
+    exchange_resp = requests.get(exchange_url, params=exchange_params)
+    exchange_data = exchange_resp.json()
+    long_lived_user_token = exchange_data.get("access_token", user_access_token)
+
+    # 2. Get pages with Long-lived Page Tokens using Long-lived User Token
     pages_url = "https://graph.facebook.com/v20.0/me/accounts"
-    pages_resp = requests.get(pages_url, params={"access_token": user_access_token})
+    pages_resp = requests.get(pages_url, params={"access_token": long_lived_user_token})
     pages_data = pages_resp.json()
+
+    print("😏😏😏Facebook pages response:",pages_data)
     
     if "data" not in pages_data:
         return JsonResponse({"error": "Failed to fetch pages", "details": pages_data})
@@ -130,36 +151,23 @@ def facebook_callback(request):
         return JsonResponse({"error": "User not found"})
 
     saved_pages = []
-    subscription_results = []
-
     for page in pages_data["data"]:
         page_id = page["id"]
         page_name = page.get("name", "")
-        short_lived_token = page["access_token"]
-
-        exchange_url = "https://graph.facebook.com/v20.0/oauth/access_token"
-        exchange_params = {
-            "grant_type": "fb_exchange_token",
-            "client_id": settings.FB_APP_ID,
-            "client_secret": settings.FB_APP_SECRET,
-            "fb_exchange_token": short_lived_token,
-        }
-        
-        exchange_resp = requests.get(exchange_url, params=exchange_params)
-        exchange_data = exchange_resp.json()
-        long_lived_token = exchange_data.get("access_token", short_lived_token)
-        
+        # This token is already long-lived because we used long-lived user token to fetch accounts
+        page_access_token = page["access_token"] 
 
         fb_profile, created = ChatProfile.objects.update_or_create(
             profile_id=page_id,
             defaults={
                 "user": user,
                 "name": page_name,
-                "access_token": long_lived_token,
+                "access_token": page_access_token,
                 "bot_active": True,
                 "platform": "facebook",
             }
         )
+        saved_pages.append(page_id)
         
     if _from == "app":
         return render(request,'redirect.html')
@@ -202,9 +210,11 @@ def instagram_callback(request):
         return Response({"error": "Missing code parameter"}, status=400)
 
     token_url = "https://graph.facebook.com/v20.0/oauth/access_token"
+    redirect_uri = request.build_absolute_uri(reverse("instagram_callback")).split('?')[0]
+    
     params = {
         "client_id": settings.FB_APP_ID,
-        "redirect_uri": "https://ape-in-eft.ngrok-free.app/instagram/callback/",
+        "redirect_uri": redirect_uri,
         "client_secret": settings.FB_APP_SECRET,
         "code": code,
     }
@@ -345,9 +355,11 @@ def whatsapp_callback(request):
 
     # Exchange code for access token
     token_url = "https://graph.facebook.com/v19.0/oauth/access_token"
+    redirect_uri = request.build_absolute_uri(reverse("whatsapp_callback")).split('?')[0]
+    
     params = {
         "client_id": settings.FB_APP_ID,
-        "redirect_uri": "https://ape-in-eft.ngrok-free.app/whatsapp/callback/",
+        "redirect_uri": redirect_uri,
         "client_secret": settings.FB_APP_SECRET,
         "code": code,
     }
@@ -555,5 +567,5 @@ class SubscribeFacebookPageToWebhook(views.APIView):
         if not subscribe:
             return Response({"error": "Failed to subscribe page to webhook"}, status=500)
             
-        ChatProfile.objects.all().exclude(id=profile.id).delete()
+        ChatProfile.objects.filter(user=profile.user).exclude(id=profile.id).delete()
         return Response({"success": "Page subscribed to webhook"}, status=200)
