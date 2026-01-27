@@ -193,6 +193,72 @@ def parse_timezone_offset(tz_string):
     except (ValueError, TypeError):
         return pytz.UTC
 
+def get_timezone_object(tz_string):
+    """
+    Parse timezone string and return a timezone object.
+    Handles both named timezones (e.g., 'Asia/Dhaka') and offset-based (e.g., '+6', '+06:00').
+    
+    Args:
+        tz_string: Timezone string (named or offset)
+        
+    Returns:
+        pytz timezone object or FixedOffset
+    """
+    if not tz_string:
+        return pytz.UTC
+        
+    try:
+        # Check if it's an offset-based timezone
+        if any(char in tz_string for char in ['+', '-']) or tz_string.isdigit():
+            return parse_timezone_offset(tz_string)
+        # Otherwise treat as named timezone
+        return pytz.timezone(tz_string)
+    except Exception:
+        return pytz.UTC
+
+def local_to_utc(local_datetime, timezone_str):
+    """
+    Convert local datetime to UTC.
+    
+    Args:
+        local_datetime: datetime object (naive or aware) in local timezone
+        timezone_str: Timezone string (e.g., 'Asia/Dhaka', '+6', '+06:00')
+        
+    Returns:
+        datetime object in UTC
+    """
+    from django.utils import timezone as django_timezone
+    
+    user_tz = get_timezone_object(timezone_str)
+    
+    # If datetime is naive, localize it to user timezone
+    if django_timezone.is_naive(local_datetime):
+        local_aware = user_tz.localize(local_datetime)
+    else:
+        # If already aware, convert to user timezone first
+        local_aware = local_datetime.astimezone(user_tz)
+    
+    # Convert to UTC
+    utc_datetime = local_aware.astimezone(pytz.UTC)
+    return utc_datetime
+
+def utc_to_local(utc_datetime, timezone_str):
+    """
+    Convert UTC datetime to local timezone.
+    
+    Args:
+        utc_datetime: datetime object in UTC
+        timezone_str: Timezone string (e.g., 'Asia/Dhaka', '+6', '+06:00')
+        
+    Returns:
+        datetime object in local timezone
+    """
+    user_tz = get_timezone_object(timezone_str)
+    
+    # Convert UTC to local timezone
+    local_datetime = utc_datetime.astimezone(user_tz)
+    return local_datetime
+
 def get_reminder_time_utc(start_time_utc, reminder_hours_before, tz_info):
     """
     Calculate reminder time in UTC.
@@ -263,16 +329,7 @@ def create_booking(request,company_id,data=None):
     number = data.get('number')
     
     # Get timezone from params (e.g., "Asia/Dhaka" or "+06:00")
-    timezone_str = request.query_params.get('timezone') or company.timezone
-    
-    try:
-        # Try to parse as timezone name first (e.g., "Asia/Dhaka")
-        if any(char in timezone_str for char in ['+', '-']) or timezone_str.isdigit():
-             user_tz = parse_timezone_offset(timezone_str)
-        else:
-             user_tz = pytz.timezone(timezone_str or 'UTC')
-    except Exception:
-        user_tz = pytz.UTC
+    timezone_str = request.query_params.get('timezone') or company.timezone or 'UTC'
     
     # Calculate UTC times for Google Calendar
     start_dt = None
@@ -297,15 +354,9 @@ def create_booking(request,company_id,data=None):
             start_dt = start_time_local
         
         if start_dt:
-            # Localize to user timezone and convert to UTC
-            # Assuming input is naive local time
-            if timezone.is_naive(start_dt):
-                start_aware = user_tz.localize(start_dt)
-            else:
-                start_aware = start_dt.astimezone(user_tz)
-                
-            start_utc = start_aware.astimezone(pytz.UTC)
-            print(f"DEBUG: create_booking - Input: {start_dt}, TZ: {user_tz}, UTC: {start_utc}")
+            # Convert local time to UTC using utility function
+            start_utc = local_to_utc(start_dt, timezone_str)
+            print(f"DEBUG: create_booking - Input: {start_dt}, TZ: {timezone_str}, UTC: {start_utc}")
             
             # Update data with UTC time for DB saving
             data['start_time'] = start_utc
@@ -424,8 +475,8 @@ def create_booking(request,company_id,data=None):
     
     # Send confirmation SMS
     if number:
-        # Convert UTC time back to user local time for display
-        local_start = booking.start_time.astimezone(user_tz)
+        # Convert UTC time back to user local time for display using utility function
+        local_start = utc_to_local(booking.start_time, timezone_str)
         
         text_message = (
             f"Booking Confirmed ✓\n"

@@ -14,29 +14,19 @@ class BookingSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['company', 'google_event_id', 'event_link', 'created_at']
 
-    def get_tz(self, obj):
-        if not obj.company:
-            return pytz.UTC
-        timezone_str = obj.company.timezone or 'UTC'
-        try:
-            if any(char in timezone_str for char in ['+', '-']) or timezone_str.isdigit():
-                 from Others.helper import parse_timezone_offset
-                 return parse_timezone_offset(timezone_str)
-            return pytz.timezone(timezone_str)
-        except Exception:
-            return pytz.UTC
-
     def get_start_time_local(self, obj):
         if not obj.start_time:
             return None
-        tz = self.get_tz(obj)
-        return obj.start_time.astimezone(tz).strftime('%Y-%m-%d %I:%M %p')
+        from Others.helper import utc_to_local
+        timezone_str = obj.company.timezone if obj.company and obj.company.timezone else 'UTC'
+        return utc_to_local(obj.start_time, timezone_str).strftime('%Y-%m-%d %I:%M %p')
 
     def get_end_time_local(self, obj):
         if not obj.end_time:
             return None
-        tz = self.get_tz(obj)
-        return obj.end_time.astimezone(tz).strftime('%Y-%m-%d %I:%M %p')
+        from Others.helper import utc_to_local
+        timezone_str = obj.company.timezone if obj.company and obj.company.timezone else 'UTC'
+        return utc_to_local(obj.end_time, timezone_str).strftime('%Y-%m-%d %I:%M %p')
   
 class FieldChangeSerializer(serializers.Serializer):
     field = serializers.CharField()

@@ -724,11 +724,15 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                     booking = create_booking(mock_req, company_id)
                     # Assuming create_booking returns a Booking object or Response
                     if hasattr(booking, 'id'):
-                         # Show local time in the confirmation message
-                         local_time = booking.start_time.astimezone(user_tz)
+                         # Show local time in the confirmation message using utility function
+                         from Others.helper import utc_to_local
+                         timezone_str = company.timezone if (company and company.timezone) else 'UTC'
+                         local_time = utc_to_local(booking.start_time, timezone_str)
+                         formatted_time = local_time.strftime('%Y-%m-%d %I:%M %p')
+                         
                          deduct_tokens_now()
                          return {
-                             "content": f"Booking confirmed! Your appointment for {booking.title} is set for {booking.start_time}. Would you like to pay online now or pay later?",
+                             "content": f"Booking confirmed! Your appointment for {booking.title} is set for {formatted_time}. Would you like to pay online now or pay later?",
                              "token_usage": token_usage
                          }
                     else:

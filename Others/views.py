@@ -1033,9 +1033,10 @@ class MonthlyBookingsView(APIView):
         # Prepare booking list with details
         bookings_list = []
         for booking in bookings_qs:
-            # Convert times to local timezone for display
-            b_start_local = booking.start_time.astimezone(company_tz)
-            b_end_local = booking.end_time.astimezone(company_tz) if booking.end_time else None
+            # Convert times to local timezone for display using utility function
+            from Others.helper import utc_to_local
+            b_start_local = utc_to_local(booking.start_time, tz_name)
+            b_end_local = utc_to_local(booking.end_time, tz_name) if booking.end_time else None
 
             booking_data = {
                 "id": booking.id,
@@ -1049,7 +1050,7 @@ class MonthlyBookingsView(APIView):
                 "event_link": booking.event_link,
                 "google_event_id": booking.google_event_id,
                 "reminder_hours_before": booking.reminder_hours_before,
-                "created_at": booking.created_at.astimezone(company_tz).strftime("%Y-%m-%d %H:%M:%S")
+                "created_at": utc_to_local(booking.created_at, tz_name).strftime("%Y-%m-%d %H:%M:%S")
             }
             bookings_list.append(booking_data)
 
