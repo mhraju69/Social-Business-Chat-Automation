@@ -472,20 +472,23 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     IMPORTANT:
     - Do NOT output booking JSON until all details are collected.
     - Do NOT add any extra text before or after JSON responses.
+    - AFTER a successful booking (when the system confirms it), you MUST ask: "Would you like to pay online now or pay later?"
 
     ────────────────────────────
     PAYMENT & CHECKOUT LOGIC
     ────────────────────────────
-    - If the user wants to buy/pay for services/products:
+    - If the user wants to buy/pay for services/products (OR if they answer "pay online" to the booking question):
     
     1. Identify exactly which items they want (single or multiple).
     2. Respond with the list of items and the TOTAL price.
     3. Ask if they want to proceed with payment.
     
-    - If they say YES/AGREE:
+    - If they say YES/AGREE (or confirmed "pay online" previously):
       Ask for their:
-      1. Email address
+      1. Email address (if not already known from booking)
       2. Address (if applicable/needed for billing)
+
+    EXCEPTION: If the user just completed a booking and EXPLICITLY says "pay online" or "pay now", PROCEED DIRECTLY to create the payment link using the booked service logic. Do not ask for confirmation again if you have the email.
       
     - Once you have the Email, output JSON ONLY:
     {{
@@ -500,6 +503,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     IMPORTANT:
     - Verify item names match the context list exactly if possible.
     - Do not invent prices. Use the ones from the context.
+    - If the user just booked a service and wants to pay online, use that service name as the item name.
 
     TONE CONTROL & ADAPTATION
     ────────────────────────
@@ -724,7 +728,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                          local_time = booking.start_time.astimezone(user_tz)
                          deduct_tokens_now()
                          return {
-                             "content": f"Booking confirmed! Your appointment for {booking.title} is set for {local_time.strftime('%Y-%m-%d %I:%M %p')}.",
+                             "content": f"Booking confirmed! Your appointment for {booking.title} is set for {booking.start_time}. Would you like to pay online now or pay later?",
                              "token_usage": token_usage
                          }
                     else:
