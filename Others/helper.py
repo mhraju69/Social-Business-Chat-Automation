@@ -193,12 +193,15 @@ def parse_timezone_offset(tz_string):
     except (ValueError, TypeError):
         return pytz.UTC
 
-def get_reminder_time_utc(start_time_utc, reminder_hours_before, tz_offset):
+def get_reminder_time_utc(start_time_utc, reminder_hours_before, tz_info):
     """
-    Calculate reminder time in UTC
-    start_time_utc: Already in UTC from DB
+    Calculate reminder time in UTC.
+    tz_info can be a pytz timezone object or an offset string.
     """
-    user_tz = parse_timezone_offset(tz_offset)
+    if isinstance(tz_info, str):
+        user_tz = parse_timezone_offset(tz_info)
+    else:
+        user_tz = tz_info
     
     # Convert to user local time
     start_local = start_time_utc.astimezone(user_tz)
@@ -264,8 +267,11 @@ def create_booking(request,company_id,data=None):
     
     try:
         # Try to parse as timezone name first (e.g., "Asia/Dhaka")
-        user_tz = pytz.timezone(timezone_str)
-    except pytz.exceptions.UnknownTimeZoneError:
+        if any(char in timezone_str for char in ['+', '-']) or timezone_str.isdigit():
+             user_tz = parse_timezone_offset(timezone_str)
+        else:
+             user_tz = pytz.timezone(timezone_str or 'UTC')
+    except Exception:
         user_tz = pytz.UTC
     
     # Calculate UTC times for Google Calendar
@@ -299,6 +305,7 @@ def create_booking(request,company_id,data=None):
                 start_aware = start_dt.astimezone(user_tz)
                 
             start_utc = start_aware.astimezone(pytz.UTC)
+            print(f"DEBUG: create_booking - Input: {start_dt}, TZ: {user_tz}, UTC: {start_utc}")
             
             # Update data with UTC time for DB saving
             data['start_time'] = start_utc
@@ -417,13 +424,13 @@ def create_booking(request,company_id,data=None):
     
     # Send confirmation SMS
     if number:
-        # Use the raw booking time (which matches input) for SMS
-        # No timezone conversion needed as requested
+        # Convert UTC time back to user local time for display
+        local_start = booking.start_time.astimezone(user_tz)
         
         text_message = (
             f"Booking Confirmed ✓\n"
             f"Title: {booking.title}\n"
-            f"Time: {booking.start_time.strftime('%d %b %Y, %I:%M %p')}\n"
+            f"Time: {local_start.strftime('%d %b %Y, %I:%M %p')}\n"
             f"Location: {booking.location or 'N/A'}\n"
             f"Event Link: {booking.event_link or 'N/A'}\n"
             f"\n⏰ Reminder: 1 hour before"

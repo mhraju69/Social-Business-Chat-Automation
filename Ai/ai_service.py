@@ -59,14 +59,30 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
     """
     print(f"DEBUG: get_available_slots call for Company {company_id}, Date: {date_str}")
     try:
-        from django.utils import timezone
+        from django.utils import timezone as django_timezone
+        
+        # Get company timezone
+        company = Company.objects.filter(id=company_id).first()
+        timezone_str = company.timezone if (company and company.timezone) else 'UTC'
+        try:
+            if any(char in timezone_str for char in ['+', '-']) or timezone_str.isdigit():
+                 from Others.helper import parse_timezone_offset
+                 user_tz = parse_timezone_offset(timezone_str)
+            else:
+                 user_tz = pytz.timezone(timezone_str)
+        except Exception:
+            user_tz = pytz.UTC
+
+        # Get local time
+        now_local = django_timezone.now().astimezone(user_tz)
         
         if not date_str:
-            target_date = datetime.now()
+            target_date = now_local
         else:
-            # Handle potential ISO format or other variations if simple strptime fails
             try:
                 target_date = datetime.strptime(date_str, "%Y-%m-%d")
+                # Localize naive date from LLM to company timezone
+                target_date = user_tz.localize(target_date)
             except ValueError:
                 logger.error(f"Date parsing failed for {date_str}")
                 return []
@@ -76,60 +92,85 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
         weekday = day_map[target_date.weekday()]
         
         # Get Opening Hours
-        hours = OpeningHours.objects.filter(company_id=company_id, day=weekday).first()
-        if not hours:
+        hours_qs = OpeningHours.objects.filter(company_id=company_id, day=weekday)
+        if not hours_qs.exists():
             return [] # Closed
             
-        # Define working hours
-        start_time = datetime.combine(target_date.date(), hours.start)
-        end_time = datetime.combine(target_date.date(), hours.end)
+        # Get Bookings for this day (Querying in UTC)
+        start_of_day = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        end_of_day = start_of_day + timedelta(days=1)
         
-        # Get Bookings for this day
-        # Ensure we filter properly using start_time__date
         bookings = Booking.objects.filter(
             company_id=company_id, 
-            start_time__date=target_date.date()
+            start_time__gte=start_of_day.astimezone(pytz.UTC),
+            start_time__lt=end_of_day.astimezone(pytz.UTC)
         )
         
         booked_ranges = []
         for b in bookings:
-            # We assume booking start/end are datetime objects
-            # Convert to naive for comparison if needed matching start_time
-            b_start = b.start_time.replace(tzinfo=None) if b.start_time.tzinfo else b.start_time
+            # Convert booking times to company local time
+            b_start = b.start_time.astimezone(user_tz)
             if b.end_time:
-                 b_end = b.end_time.replace(tzinfo=None) if b.end_time.tzinfo else b.end_time
+                 b_end = b.end_time.astimezone(user_tz)
             else:
                  b_end = b_start + timedelta(hours=1)
-            
             booked_ranges.append((b_start, b_end))
             
-        # Generate Slots (Hourly)
+        # Generate Slots (Hourly) based on all opening hour ranges for the day
         slots = []
-        current = start_time
-        now_naive = datetime.now()
-        
-        while current + timedelta(hours=1) <= end_time:
-            slot_end = current + timedelta(hours=1)
-            is_taken = False
-            for b_start, b_end in booked_ranges:
-                # Check overlap: (StartA < EndB) and (EndA > StartB)
-                if current < b_end and slot_end > b_start:
-                    is_taken = True
-                    break
+        for hours in hours_qs:
+            current = target_date.replace(hour=hours.start.hour, minute=hours.start.minute, second=0, microsecond=0)
+            day_end = target_date.replace(hour=hours.end.hour, minute=hours.end.minute, second=0, microsecond=0)
             
-            # Use naive comparison for future check
-            if not is_taken:
-                 # If checking today, ensure we don't show past slots
-                 # For future dates, current > now is always true or irrelevant if we just check date
-                 if current.date() > now_naive.date() or (current.date() == now_naive.date() and current > now_naive):
-                    slots.append(current.strftime("%H:%M"))
-            
-            current += timedelta(hours=1)
+            while current + timedelta(hours=1) <= day_end:
+                slot_end = current + timedelta(hours=1)
+                is_taken = False
+                for b_start, b_end in booked_ranges:
+                    if current < b_end and slot_end > b_start:
+                        is_taken = True
+                        break
+                
+                if not is_taken:
+                    # Don't show past slots
+                    if current > now_local:
+                        slots.append(current.strftime("%I:%M %p")) 
+                
+                current += timedelta(hours=1)
         
-        return slots
+        return sorted(list(set(slots))) # Remove duplicates and sort
     except Exception as e:
         logger.error(f"Error calculating slots: {e}")
+        import traceback
+        traceback.print_exc()
         return []
+
+def get_multi_day_availability(company_id: int, days: int = 7) -> Dict[str, List[str]]:
+    """Get availability for the next N days"""
+    from django.utils import timezone as django_timezone
+    
+    # Get company timezone
+    company = Company.objects.filter(id=company_id).first()
+    timezone_str = company.timezone if (company and company.timezone) else 'UTC'
+    try:
+        if any(char in timezone_str for char in ['+', '-']) or timezone_str.isdigit():
+             from Others.helper import parse_timezone_offset
+             user_tz = parse_timezone_offset(timezone_str)
+        else:
+             user_tz = pytz.timezone(timezone_str)
+    except Exception:
+        user_tz = pytz.UTC
+
+    now_local = django_timezone.now().astimezone(user_tz)
+    availability = {}
+    
+    for i in range(days):
+        target_date = now_local + timedelta(days=i)
+        date_str = target_date.strftime("%Y-%m-%d")
+        slots = get_available_slots(company_id, date_str)
+        if slots:
+            availability[date_str] = slots
+            
+    return availability
 
 def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] = None, tone: str = "professional") -> dict:
     print(f"\n🚀 --- get_ai_response started (Company: {company_id}, Tone: {tone}) ---")
@@ -239,19 +280,32 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                 ).order_by('start_time')
                 
                 if realtime_bookings.exists():
+                    # Get user_tz for localizing display
+                    timezone_str = company.timezone or 'UTC'
+                    try:
+                        if any(char in timezone_str for char in ['+', '-']) or timezone_str.isdigit():
+                             from Others.helper import parse_timezone_offset
+                             user_tz = parse_timezone_offset(timezone_str)
+                        else:
+                             user_tz = pytz.timezone(timezone_str)
+                    except Exception:
+                        user_tz = pytz.UTC
+
                     schedule_text = "\n\n--- REALTIME AVAILABILITY DATA ---\n"
                     schedule_text += "Use this to answer availability questions. DO NOT reveal client names.\n"
                     
                     # Group by day
                     grouped = {}
                     for bk in realtime_bookings:
-                        # Convert to company timezone if possible, but standard is often UTC or server time.
-                        # Assuming usage of naive or standardized time here for simplicity.
-                        day = bk.start_time.strftime('%Y-%m-%d (%A)')
+                        # Convert to company timezone for accurate local display
+                        bk_start_local = bk.start_time.astimezone(user_tz)
+                        bk_end_local = bk.end_time.astimezone(user_tz) if bk.end_time else (bk_start_local + timedelta(hours=1))
+                        
+                        day = bk_start_local.strftime('%Y-%m-%d (%A)')
                         if day not in grouped:
                             grouped[day] = []
                         # Just show time as 'Occupied'
-                        grouped[day].append(f"{bk.start_time.strftime('%H:%M')} - {bk.end_time.strftime('%H:%M')}: Occupied")
+                        grouped[day].append(f"{bk_start_local.strftime('%H:%M')} - {bk_end_local.strftime('%H:%M')}: Occupied")
                     
                     for day, slots in grouped.items():
                         schedule_text += f"{day}:\n" + "\n".join(f"  - {s}" for s in slots) + "\n"
@@ -388,7 +442,9 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     BOOKING & AVAILABILITY LOGIC
     ────────────────────────────
     - If the user shows interest in booking → ask if they would like to book an appointment.
-    - If the user asks about availability (specific day or general):
+    - If the user asks about availability (specific day or general "when are you free"):
+    If they ask for today or a specific date, provide that date. 
+    If they ask generally, set date to null to check the next 7 days.
 
     Output JSON ONLY:
     {{
@@ -484,7 +540,20 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     # Remove StrOutputParser to get full AIMessage object with metadata
     chain = prompt | llm 
     
-    current_dt = datetime.now()
+    # Determine current time based on company timezone
+    from django.utils import timezone as django_timezone
+    timezone_str = company.timezone if (company and company.timezone) else 'UTC'
+    try:
+        if any(char in timezone_str for char in ['+', '-']) or timezone_str.isdigit():
+             from Others.helper import parse_timezone_offset
+             user_tz = parse_timezone_offset(timezone_str)
+        else:
+             user_tz = pytz.timezone(timezone_str)
+    except Exception:
+        user_tz = pytz.UTC
+    
+    current_dt = django_timezone.now().astimezone(user_tz)
+    
     response = chain.invoke({
         "company_name": company_name,
         "context": context_text, 
@@ -569,23 +638,34 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
             if action == "check_availability":
                 # checking logic
                 date_str = data.get("date")
-                slots = get_available_slots(company_id, date_str)
-                if slots:
-                    slot_str = ", ".join(slots)
-                    system_msg = f"System Info: Available slots for {date_str or 'today'}: {slot_str}. Present these to the user nicely."
-                else:
-                    system_msg = f"System Info: No slots available for {date_str or 'today'}."
                 
-                # Re-prompt LLM
-                current_now = datetime.now()
+                if date_str:
+                    slots = get_available_slots(company_id, date_str)
+                    if slots:
+                        slot_str = ", ".join(slots)
+                        system_msg = f"System Info: Available slots for {date_str}: {slot_str}. Present these to the user nicely."
+                    else:
+                        system_msg = f"System Info: No slots available for {date_str}."
+                else:
+                    # Check next 7 days
+                    availability = get_multi_day_availability(company_id, days=7)
+                    if availability:
+                        avail_text = ""
+                        for d, s in availability.items():
+                            avail_text += f"{d}: {', '.join(s)}\n"
+                        system_msg = f"System Info: Upcoming availability for the next 7 days:\n{avail_text}. Suggest these to the user."
+                    else:
+                        system_msg = f"System Info: No available slots found for the next 7 days."
+                
+                # Re-prompt LLM using same current_dt
                 response_2 = chain.invoke({
                     "company_name": company_name,
                     "context": context_text + "\n" + system_msg, 
                     "question": query, 
                     "history": history_text + f"\nAssistant (Internal): Checking slots for {date_str}.\nSystem: {system_msg}",
                     "tone": tone,
-                    "current_date": current_now.strftime("%Y-%m-%d"),
-                    "current_day": current_now.strftime("%A")
+                    "current_date": current_dt.strftime("%Y-%m-%d"),
+                    "current_day": current_dt.strftime("%A")
                 })
                 
                 response_text = response_2.content
@@ -640,9 +720,11 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                     booking = create_booking(mock_req, company_id)
                     # Assuming create_booking returns a Booking object or Response
                     if hasattr(booking, 'id'):
+                         # Show local time in the confirmation message
+                         local_time = booking.start_time.astimezone(user_tz)
                          deduct_tokens_now()
                          return {
-                             "content": f"Booking confirmed! Your appointment for {booking.title} is set for {booking.start_time}.",
+                             "content": f"Booking confirmed! Your appointment for {booking.title} is set for {local_time.strftime('%Y-%m-%d %I:%M %p')}.",
                              "token_usage": token_usage
                          }
                     else:

@@ -18,10 +18,13 @@ from django.db.models import Count
 from django.db.models.functions import Lower
 from Accounts.models import *
 from Accounts.utils import get_company_user
+from collections import Counter
 # Create your views here.
+
 
 def Connect(request):
     return render(request,'connect.html')
+
 
 class FacebookConnectView(APIView):
     permission_classes = [IsAuthenticated]
@@ -122,6 +125,15 @@ def facebook_callback(request):
 
     user_access_token = data["access_token"]
 
+    # Debug token to check actual scopes
+    debug_url = "https://graph.facebook.com/debug_token"
+    debug_params = {
+        "input_token": user_access_token,
+        "access_token": f"{settings.FB_APP_ID}|{settings.FB_APP_SECRET}"
+    }
+    debug_resp = requests.get(debug_url, params=debug_params)
+    print("😏😏😏 Token Scopes Debug:", debug_resp.json().get('data', {}).get('scopes'))
+
     # 1. Exchange short-lived User Access Token for Long-lived User Access Token
     exchange_url = "https://graph.facebook.com/v20.0/oauth/access_token"
     exchange_params = {
@@ -174,6 +186,7 @@ def facebook_callback(request):
     else:
         return redirect(f"{settings.FRONTEND_URL}/user/chat-profile")
 
+
 class InstagramConnectView(APIView):
     # permission_classes = [AllowAny]
     permission_classes = [IsAuthenticated]
@@ -193,6 +206,7 @@ class InstagramConnectView(APIView):
             f"&state={state},{request.query_params.get('from',"web")}"
         )
         return Response({"redirect_url":fb_login_url})
+
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -312,6 +326,7 @@ def instagram_callback(request):
     else:
         return redirect(f"{settings.FRONTEND_URL}/user/policy")
 
+
 class ConnectWhatsappView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
@@ -330,6 +345,7 @@ class ConnectWhatsappView(APIView):
         redirect_url = f"https://www.facebook.com/v19.0/dialog/oauth?client_id={settings.FB_APP_ID}&redirect_uri={redirect_url}&state={state},{request.query_params.get('from','web')}&response_type=code&config_id={settings.WHATSAPP_CONFIG_ID}"
         
         return Response({"redirect_url": redirect_url})
+
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -487,7 +503,8 @@ class ChatProfileView(RetrieveUpdateAPIView):
             return ChatProfile.objects.filter(user=target_user, platform=platform).first()
         except ChatProfile.DoesNotExist:
             raise NotFound(detail=f"ChatProfile with platform '{platform}' not found.")
- 
+
+
 class ChatProfileListView(ListAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = ChatProfileSerializers
@@ -513,14 +530,41 @@ class CommonAskedLeaderboard(APIView):
         if not company:
             return Response({"error": "Company not found"}, status=404)
 
-        data = ChatMessage.objects.filter(
+        # Get all incoming messages for this user's rooms
+        messages = ChatMessage.objects.filter(
             room__profile__user=target_user,
             type='incoming'
-        ).values('text').annotate(
-            count=Count('id')
-        ).order_by('-count')[:10]  # top 20 questions
+        ).values_list('text', flat=True)
+
+        # Define question starters
+        question_starters = (
+            "what", "why", "how", "when", "where", "who",
+            "can", "could", "would", "should", "is", "are", "do", "does"
+        )
+
+        # Filter messages that are questions
+        questions = []
+        for text in messages:
+            stripped_text = text.strip()
+            if stripped_text.endswith('?'):
+                questions.append(stripped_text)
+            else:
+                # Check if it starts with a question word
+                first_word = stripped_text.split(' ')[0].lower()
+                if first_word in question_starters:
+                    questions.append(stripped_text)
+
+        # Count the occurrences of each question
+        question_counts = Counter(questions)
+
+        # Get top 10 most common questions
+        top_questions = question_counts.most_common(10)
+
+        # Format data as list of dicts
+        data = [{"text": q, "count": c} for q, c in top_questions]
 
         return Response(data)
+
 
 class GetOldMessage(APIView):
     permission_classes = [IsAuthenticated]
@@ -537,7 +581,8 @@ class GetOldMessage(APIView):
             return Response(serializer.data)
         except ChatRoom.DoesNotExist:
             return Response({"error": "Room not found"}, status=404)
-        
+
+      
 class GetTestChatOldMessage(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
@@ -555,6 +600,7 @@ class GetTestChatOldMessage(APIView):
         # Use [::-1] as in GetOldMessage to likely match frontend expectation (chronological order)
         serializer = TestChatSerializer(messages[::-1], many=True)
         return Response(serializer.data)
+
 
 class SubscribeFacebookPageToWebhook(views.APIView):
     def post(self,request,*args,**kwargs):

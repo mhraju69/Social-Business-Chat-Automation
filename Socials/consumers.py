@@ -420,6 +420,7 @@ def send_alert(target, title, subtitle="", type="info"):
 class TestChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.room_group_name = "ai_chat"
+        self.history = [] # Temporary in-memory history
         try:
             token = self.scope['query_string'].decode().split('token=')[-1]
             self.user = await GlobalChatConsumer.get_user_from_token(token) 
@@ -452,19 +453,21 @@ class TestChatConsumer(AsyncWebsocketConsumer):
                 await self.send(text_data=json.dumps({"error": "No message received."}))
                 return
 
-            # Save incoming message
-            await self.save_message(user_message, 'incoming')
-
-            # Send typing event (optional)
-            await self.send(text_data=json.dumps({"status": "typing"}))
+            # Get history for AI (excluding current message)
+            history = self.history[-20:] if self.history else []
 
             # Run AI in background
-            response = await self.get_ai_response(user_message)
+            response = await self.get_ai_response(user_message, history)
             
             ai_message = response.get('content', "Sorry, I couldn't generate a response.")
 
-            # Save outgoing (AI) message
-            await self.save_message(ai_message, 'outgoing')
+            # Update in-memory history
+            self.history.append({"role": "user", "content": user_message})
+            self.history.append({"role": "assistant", "content": ai_message})
+            
+            # Keep history to last 20 messages
+            if len(self.history) > 20:
+                self.history = self.history[-20:]
 
             await self.send(text_data=json.dumps({
                 "sender": "ai",
@@ -475,18 +478,7 @@ class TestChatConsumer(AsyncWebsocketConsumer):
             print(f"Error in TestChat: {e}")
             await self.send(text_data=json.dumps({"error": str(e)}))
 
-    @database_sync_to_async
-    def save_message(self, text, msg_type):
-        if not self.company:
-            return
-        TestChat.objects.create(
-            company=self.company,
-            type=msg_type,
-            text=text,
-            processed=True
-        )
-
-    async def get_ai_response(self, user_message):
+    async def get_ai_response(self, user_message, history):
         from asgiref.sync import sync_to_async
         from Socials.helper import check_msg_limit
 
@@ -497,7 +489,12 @@ class TestChatConsumer(AsyncWebsocketConsumer):
         if not await sync_to_async(check_msg_limit)(self.company.id):
             return {"content": "Daily AI response limit reached. Bot has been deactivated."}
 
-        response = await sync_to_async(get_ai_response)(self.company.id, user_message, tone="friendly")
+        response = await sync_to_async(get_ai_response)(
+            self.company.id, 
+            user_message, 
+            history=history, 
+            tone="friendly"
+        )
         return response
     
     @database_sync_to_async

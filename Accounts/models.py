@@ -90,6 +90,7 @@ class Company(models.Model):
 
     # AI training
     tone = models.CharField(max_length=50, default='professional')
+    greeting = models.TextField(blank=True, null=True)
 
     # Website link
     website = models.CharField(max_length=255, blank=True, null=True)
