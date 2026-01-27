@@ -28,17 +28,19 @@ def schedule_booking_reminder(sender, instance, created, **kwargs):
         return
     
     try:
-        # Get timezone offset
-        tz_offset = instance.company.user.timezone or "+6"  # Default Bangladesh
+        # Get company timezone (prefer company.timezone, then user.timezone, then default +6)
+        tz_offset = instance.company.timezone or instance.company.user.timezone or "+6"
         
         # Reminder hours before (default 1 hour)
         reminder_hours = getattr(instance, 'reminder_hours_before', 1)
         
         # Calculate reminder time
+        # get_reminder_time_utc in helper now handles both objects and strings,
+        # but here we pass the string or name found in Company/User.
         remind_at_utc = get_reminder_time_utc(
             start_time_utc=instance.start_time,
             reminder_hours_before=reminder_hours,
-            tz_offset=tz_offset
+            tz_info=tz_offset
         )
         
         # Current time in UTC

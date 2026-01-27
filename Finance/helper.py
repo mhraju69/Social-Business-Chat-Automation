@@ -336,9 +336,11 @@ def process_auto_renewal(company_id):
         ).order_by('-end').first()
 
         if not subscription:
+            print(f"⏭️ [Auto-Renew] No active expired subscription found for company {company_id}")
             return None, "No active expired subscription found with auto-renew enabled."
 
         if not company.stripe_customer_id or not company.stripe_payment_method_id:
+            print(f"❌ [Auto-Renew] Missing Stripe info for company {company_id}: customer={company.stripe_customer_id}, pm={company.stripe_payment_method_id}")
             return None, "Missing Stripe customer or payment method for auto-charge."
 
         plan = subscription.plan

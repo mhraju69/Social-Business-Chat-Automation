@@ -18,10 +18,13 @@ from django.db.models import Count
 from django.db.models.functions import Lower
 from Accounts.models import *
 from Accounts.utils import get_company_user
+from collections import Counter
 # Create your views here.
+
 
 def Connect(request):
     return render(request,'connect.html')
+
 
 class FacebookConnectView(APIView):
     permission_classes = [IsAuthenticated]
@@ -102,24 +105,54 @@ def facebook_callback(request):
         return JsonResponse({"error": "Missing code parameter"})
 
     token_url = "https://graph.facebook.com/v20.0/oauth/access_token"
+    # Dynamic redirect_uri to match the one sent in ConnectView
+    redirect_uri = request.build_absolute_uri(reverse("facebook_callback")).split('?')[0]
+    
     params = {
         "client_id": settings.FB_APP_ID,
-        "redirect_uri": "https://ape-in-eft.ngrok-free.app/facebook/callback/",
+        "redirect_uri": redirect_uri,
         "client_secret": settings.FB_APP_SECRET,
         "code": code,
     }
     
     resp = requests.get(token_url, params=params)
     data = resp.json()
+
+    # print("😏😏😏Facebook callback response:",data)
     
     if "access_token" not in data:
         return JsonResponse({"error": "Token exchange failed", "details": data})
 
     user_access_token = data["access_token"]
 
+    # Debug token to check actual scopes
+    debug_url = "https://graph.facebook.com/debug_token"
+    debug_params = {
+        "input_token": user_access_token,
+        "access_token": f"{settings.FB_APP_ID}|{settings.FB_APP_SECRET}"
+    }
+    debug_resp = requests.get(debug_url, params=debug_params)
+    print("😏😏😏 Token Scopes Debug:", debug_resp.json().get('data', {}).get('scopes'))
+
+    # 1. Exchange short-lived User Access Token for Long-lived User Access Token
+    exchange_url = "https://graph.facebook.com/v20.0/oauth/access_token"
+    exchange_params = {
+        "grant_type": "fb_exchange_token",
+        "client_id": settings.FB_APP_ID,
+        "client_secret": settings.FB_APP_SECRET,
+        "fb_exchange_token": user_access_token,
+    }
+    
+    exchange_resp = requests.get(exchange_url, params=exchange_params)
+    exchange_data = exchange_resp.json()
+    long_lived_user_token = exchange_data.get("access_token", user_access_token)
+
+    # 2. Get pages with Long-lived Page Tokens using Long-lived User Token
     pages_url = "https://graph.facebook.com/v20.0/me/accounts"
-    pages_resp = requests.get(pages_url, params={"access_token": user_access_token})
+    pages_resp = requests.get(pages_url, params={"access_token": long_lived_user_token})
     pages_data = pages_resp.json()
+
+    print("😏😏😏Facebook pages response:",pages_data)
     
     if "data" not in pages_data:
         return JsonResponse({"error": "Failed to fetch pages", "details": pages_data})
@@ -130,41 +163,29 @@ def facebook_callback(request):
         return JsonResponse({"error": "User not found"})
 
     saved_pages = []
-    subscription_results = []
-
     for page in pages_data["data"]:
         page_id = page["id"]
         page_name = page.get("name", "")
-        short_lived_token = page["access_token"]
-
-        exchange_url = "https://graph.facebook.com/v20.0/oauth/access_token"
-        exchange_params = {
-            "grant_type": "fb_exchange_token",
-            "client_id": settings.FB_APP_ID,
-            "client_secret": settings.FB_APP_SECRET,
-            "fb_exchange_token": short_lived_token,
-        }
-        
-        exchange_resp = requests.get(exchange_url, params=exchange_params)
-        exchange_data = exchange_resp.json()
-        long_lived_token = exchange_data.get("access_token", short_lived_token)
-        
+        # This token is already long-lived because we used long-lived user token to fetch accounts
+        page_access_token = page["access_token"] 
 
         fb_profile, created = ChatProfile.objects.update_or_create(
             profile_id=page_id,
             defaults={
                 "user": user,
                 "name": page_name,
-                "access_token": long_lived_token,
+                "access_token": page_access_token,
                 "bot_active": True,
                 "platform": "facebook",
             }
         )
+        saved_pages.append(page_id)
         
     if _from == "app":
         return render(request,'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/policy")
+        return redirect(f"{settings.FRONTEND_URL}/user/chat-profile")
+
 
 class InstagramConnectView(APIView):
     # permission_classes = [AllowAny]
@@ -186,6 +207,7 @@ class InstagramConnectView(APIView):
         )
         return Response({"redirect_url":fb_login_url})
 
+
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def instagram_callback(request):
@@ -202,9 +224,11 @@ def instagram_callback(request):
         return Response({"error": "Missing code parameter"}, status=400)
 
     token_url = "https://graph.facebook.com/v20.0/oauth/access_token"
+    redirect_uri = request.build_absolute_uri(reverse("instagram_callback")).split('?')[0]
+    
     params = {
         "client_id": settings.FB_APP_ID,
-        "redirect_uri": "https://ape-in-eft.ngrok-free.app/instagram/callback/",
+        "redirect_uri": redirect_uri,
         "client_secret": settings.FB_APP_SECRET,
         "code": code,
     }
@@ -302,6 +326,7 @@ def instagram_callback(request):
     else:
         return redirect(f"{settings.FRONTEND_URL}/user/policy")
 
+
 class ConnectWhatsappView(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
@@ -320,6 +345,7 @@ class ConnectWhatsappView(APIView):
         redirect_url = f"https://www.facebook.com/v19.0/dialog/oauth?client_id={settings.FB_APP_ID}&redirect_uri={redirect_url}&state={state},{request.query_params.get('from','web')}&response_type=code&config_id={settings.WHATSAPP_CONFIG_ID}"
         
         return Response({"redirect_url": redirect_url})
+
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
@@ -345,9 +371,11 @@ def whatsapp_callback(request):
 
     # Exchange code for access token
     token_url = "https://graph.facebook.com/v19.0/oauth/access_token"
+    redirect_uri = request.build_absolute_uri(reverse("whatsapp_callback")).split('?')[0]
+    
     params = {
         "client_id": settings.FB_APP_ID,
-        "redirect_uri": "https://ape-in-eft.ngrok-free.app/whatsapp/callback/",
+        "redirect_uri": redirect_uri,
         "client_secret": settings.FB_APP_SECRET,
         "code": code,
     }
@@ -475,7 +503,8 @@ class ChatProfileView(RetrieveUpdateAPIView):
             return ChatProfile.objects.filter(user=target_user, platform=platform).first()
         except ChatProfile.DoesNotExist:
             raise NotFound(detail=f"ChatProfile with platform '{platform}' not found.")
- 
+
+
 class ChatProfileListView(ListAPIView):
     permission_classes = [IsAuthenticated]
     serializer_class = ChatProfileSerializers
@@ -501,14 +530,41 @@ class CommonAskedLeaderboard(APIView):
         if not company:
             return Response({"error": "Company not found"}, status=404)
 
-        data = ChatMessage.objects.filter(
+        # Get all incoming messages for this user's rooms
+        messages = ChatMessage.objects.filter(
             room__profile__user=target_user,
             type='incoming'
-        ).values('text').annotate(
-            count=Count('id')
-        ).order_by('-count')[:10]  # top 20 questions
+        ).values_list('text', flat=True)
+
+        # Define question starters
+        question_starters = (
+            "what", "why", "how", "when", "where", "who",
+            "can", "could", "would", "should", "is", "are", "do", "does"
+        )
+
+        # Filter messages that are questions
+        questions = []
+        for text in messages:
+            stripped_text = text.strip()
+            if stripped_text.endswith('?'):
+                questions.append(stripped_text)
+            else:
+                # Check if it starts with a question word
+                first_word = stripped_text.split(' ')[0].lower()
+                if first_word in question_starters:
+                    questions.append(stripped_text)
+
+        # Count the occurrences of each question
+        question_counts = Counter(questions)
+
+        # Get top 10 most common questions
+        top_questions = question_counts.most_common(10)
+
+        # Format data as list of dicts
+        data = [{"text": q, "count": c} for q, c in top_questions]
 
         return Response(data)
+
 
 class GetOldMessage(APIView):
     permission_classes = [IsAuthenticated]
@@ -525,7 +581,8 @@ class GetOldMessage(APIView):
             return Response(serializer.data)
         except ChatRoom.DoesNotExist:
             return Response({"error": "Room not found"}, status=404)
-        
+
+      
 class GetTestChatOldMessage(APIView):
     permission_classes = [IsAuthenticated]
     def get(self, request):
@@ -544,6 +601,7 @@ class GetTestChatOldMessage(APIView):
         serializer = TestChatSerializer(messages[::-1], many=True)
         return Response(serializer.data)
 
+
 class SubscribeFacebookPageToWebhook(views.APIView):
     def post(self,request,*args,**kwargs):
         profile = ChatProfile.objects.filter(id=request.query_params.get("profile_id")).first()
@@ -555,5 +613,5 @@ class SubscribeFacebookPageToWebhook(views.APIView):
         if not subscribe:
             return Response({"error": "Failed to subscribe page to webhook"}, status=500)
             
-        ChatProfile.objects.all().exclude(id=profile.id).delete()
+        ChatProfile.objects.filter(user=profile.user).exclude(id=profile.id).delete()
         return Response({"success": "Page subscribed to webhook"}, status=200)

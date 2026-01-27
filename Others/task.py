@@ -246,13 +246,13 @@ def cleanup_system():
         deleted_count = ChatMessage.objects.filter(room=room).exclude(id__in=list(msgs_to_keep)).delete()[0]
         print(f"🗑️ Deleted {deleted_count} extra messages for room {room.id}")
 
-    # 4. Cleanup Alerts (Keep 20 per user)
-    users_with_many_alerts = Alert.objects.values('user').annotate(counts=Count('id')).filter(counts__gt=20)
-    for entry in users_with_many_alerts:
-        user_id = entry['user']
-        alerts_to_keep = Alert.objects.filter(user_id=user_id).order_by('-time')[:20].values_list('id', flat=True)
-        deleted_count = Alert.objects.filter(user_id=user_id).exclude(id__in=list(alerts_to_keep)).delete()[0]
-        print(f"🗑️ Deleted {deleted_count} extra alerts for user {user_id}")
+    # 4. Cleanup Alerts (Keep 20 per company)
+    companies_with_many_alerts = Alert.objects.values('company').annotate(counts=Count('id')).filter(counts__gt=20)
+    for entry in companies_with_many_alerts:
+        company_id = entry['company']
+        alerts_to_keep = Alert.objects.filter(company_id=company_id).order_by('-time')[:20].values_list('id', flat=True)
+        deleted_count = Alert.objects.filter(company_id=company_id).exclude(id__in=list(alerts_to_keep)).delete()[0]
+        print(f"🗑️ Deleted {deleted_count} extra alerts for company {company_id}")
 
     # 5. Cleanup Bookings (Keep 20 per company)
     from Others.models import Booking

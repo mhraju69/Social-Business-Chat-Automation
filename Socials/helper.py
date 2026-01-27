@@ -78,6 +78,11 @@ def check_token_count(company_id, count):
         ).first()
 
         if not subscription:
+            print(f"❌ [Debug] No active or unexpired subscription found for Company {company_id}")
+            # Check if any subscription exists at all for debugging
+            any_sub = Subscriptions.objects.filter(company__id=company_id).last()
+            if any_sub:
+                print(f"   - Last Sub ID: {any_sub.id}, Active: {any_sub.active}, End: {any_sub.end}, Now: {timezone.now()}")
             return False
 
         # 2. Check if tokens are exhausted

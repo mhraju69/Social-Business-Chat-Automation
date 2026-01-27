@@ -4,6 +4,7 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet 
 from rest_framework.permissions import IsAuthenticated,AllowAny
 from .models import *
+from django.urls import reverse
 from Finance.models import *
 from django.conf import settings
 from .serializers import *
@@ -883,9 +884,7 @@ class GoogleOAuthCallbackView(APIView):
         # )
         if method == "app":
             return render(request, 'redirect.html')
-        return Response(
-            {"message": "Google Calendar connected successfully!"}
-        )
+        return redirect(f"{settings.FRONTEND_URL}/user/agenda-integration")
 
 class ActiveSessionsView(APIView):
     permission_classes = [IsAuthenticated]
@@ -962,10 +961,14 @@ class MonthlyBookingsView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        tz_name = request.GET.get('timezone') or 'UTC'
+        tz_name = company.timezone if company.timezone else 'UTC'
         try:
-            company_tz = pytz.timezone(tz_name)
-        except pytz.exceptions.UnknownTimeZoneError:
+            if any(char in tz_name for char in ['+', '-']) or tz_name.isdigit():
+                 from Others.helper import parse_timezone_offset
+                 company_tz = parse_timezone_offset(tz_name)
+            else:
+                 company_tz = pytz.timezone(tz_name)
+        except Exception:
             company_tz = pytz.UTC
 
         now_utc = timezone.now()
@@ -1031,15 +1034,15 @@ class MonthlyBookingsView(APIView):
         bookings_list = []
         for booking in bookings_qs:
             # Convert times to local timezone for display
-            start_local = booking.start_time.astimezone(company_tz)
-            end_local = booking.end_time.astimezone(company_tz) if booking.end_time else None
+            b_start_local = booking.start_time.astimezone(company_tz)
+            b_end_local = booking.end_time.astimezone(company_tz) if booking.end_time else None
 
             booking_data = {
                 "id": booking.id,
                 "title": booking.title,
                 "client": booking.client,
-                "start_time": start_local.strftime("%Y-%m-%d %H:%M:%S"),
-                "end_time": end_local.strftime("%Y-%m-%d %H:%M:%S") if end_local else None,
+                "start_time": b_start_local.strftime("%Y-%m-%d %H:%M:%S"),
+                "end_time": b_end_local.strftime("%Y-%m-%d %H:%M:%S") if b_end_local else None,
                 "location": booking.location,
                 "price": booking.price,
                 "notes": booking.notes,
@@ -1054,7 +1057,7 @@ class MonthlyBookingsView(APIView):
             "day": day,
             "month": month,
             "year": year,
-            "timezone": tz_name,
+            "timezone": str(company_tz),
             "total_bookings": bookings_qs.count(),
             "bookings": bookings_list
         }, status=status.HTTP_200_OK)

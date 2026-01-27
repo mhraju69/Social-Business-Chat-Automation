@@ -99,6 +99,7 @@ def unified_webhook(request, platform):
 
                 # Token count check
                 if not check_token_count(profile.user.company.id, 1):
+                    print(f"❌ [Facebook] Token count check failed for Company {profile.user.company.id}")
                     return JsonResponse({"status": "error", "message": "Token limit reached."}, status=400)
 
             elif platform == "instagram":

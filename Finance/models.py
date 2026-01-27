@@ -201,6 +201,7 @@ class Payment(models.Model):
         # Sum successful payments
         current_total = Payment.objects.filter(
             company=company,
+            type='services',
             status='success',
             payment_date__gte=current_month_start,
             payment_date__lt=current_month_end
@@ -208,6 +209,7 @@ class Payment(models.Model):
         
         last_total = Payment.objects.filter(
             company=company,
+            type='services',
             status='success',
             payment_date__gte=last_month_start,
             payment_date__lt=last_month_end
@@ -238,6 +240,7 @@ class Payment(models.Model):
         # Query failed payments for each period
         current_month_failed = Payment.objects.filter(
             company=company,
+            type='services',
             status="failed",
             payment_date__gte=current_month_start,
             payment_date__lt=next_month
@@ -245,6 +248,7 @@ class Payment(models.Model):
 
         last_month_failed = Payment.objects.filter(
             company_id=company,
+            type='services',
             status="failed",
             payment_date__gte=last_month_start,
             payment_date__lt=last_month_end
@@ -311,6 +315,7 @@ class Payment(models.Model):
         # Calculate average successful payments
         current_avg = Payment.objects.filter(
             company=company,
+            type='services',
             status='success',
             payment_date__gte=current_month_start,
             payment_date__lt=current_month_end
@@ -318,6 +323,7 @@ class Payment(models.Model):
 
         last_avg = Payment.objects.filter(
             company=company,
+            type='services',
             status='success',
             payment_date__gte=last_month_start,
             payment_date__lt=last_month_end
