@@ -52,12 +52,12 @@ class MockRequest:
         self.data = data or {}
         self.query_params = query_params or {}
 
-def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
+def get_available_slots(company_id: int, date_str: str = None, duration_minutes: int = 60) -> List[str]:
     """
     Calculate available slots for a given date based on OpeningHours and existing Bookings.
     Returns a list of strings representing available start times.
     """
-    print(f"DEBUG: get_available_slots call for Company {company_id}, Date: {date_str}")
+    print(f"DEBUG: get_available_slots call for Company {company_id}, Date: {date_str}, Duration: {duration_minutes}m")
     try:
         from django.utils import timezone as django_timezone
         
@@ -119,14 +119,24 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
         # Get Booking Limit
         concurrent_limit = getattr(company, 'concurrent_booking_limit', 1)
 
-        # Generate Slots (Hourly) based on all opening hour ranges for the day
+        # Generate Slots based on opening hours and service duration
         slots = []
+        slot_delta = timedelta(minutes=duration_minutes)
+        # Minimum step between potential slots (e.g., every 30 mins) - or just use duration?
+        # Typically, if duration is 60, slots are 10:00, 11:00.
+        # If duration is 45, slots could be 10:00, 10:45? Or 10:00, 10:30? 
+        # For simplicity, let's increment by duration or fixed 30 mins?
+        # User request implies specific slots for service. Let's start with start-to-end packed.
+        # But standard booking usually offers fixed intervals (e.g. 30min or 1hr). 
+        # Let's align with the duration for now to ensure fit.
+        step_delta = slot_delta # strict packing
+        
         for hours in hours_qs:
             current = target_date.replace(hour=hours.start.hour, minute=hours.start.minute, second=0, microsecond=0)
             day_end = target_date.replace(hour=hours.end.hour, minute=hours.end.minute, second=0, microsecond=0)
             
-            while current + timedelta(hours=1) <= day_end:
-                slot_end = current + timedelta(hours=1)
+            while current + slot_delta <= day_end:
+                slot_end = current + slot_delta
                 
                 # Count overlaps
                 overlap_count = 0
@@ -141,7 +151,7 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
                     if current > now_local:
                         slots.append(current.strftime("%I:%M %p")) 
                 
-                current += timedelta(hours=1)
+                current += step_delta
         
         return sorted(list(set(slots))) # Remove duplicates and sort
     except Exception as e:
@@ -150,7 +160,7 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
         traceback.print_exc()
         return []
 
-def get_multi_day_availability(company_id: int, days: int = 7) -> Dict[str, List[str]]:
+def get_multi_day_availability(company_id: int, days: int = 7, duration_minutes: int = 60) -> Dict[str, List[str]]:
     """Get availability for the next N days"""
     from django.utils import timezone as django_timezone
     
@@ -172,7 +182,7 @@ def get_multi_day_availability(company_id: int, days: int = 7) -> Dict[str, List
     for i in range(days):
         target_date = now_local + timedelta(days=i)
         date_str = target_date.strftime("%Y-%m-%d")
-        slots = get_available_slots(company_id, date_str)
+        slots = get_available_slots(company_id, date_str, duration_minutes=duration_minutes)
         if slots:
             availability[date_str] = slots
             
@@ -268,58 +278,8 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         company_name = "Unknown"
 
     # --- Realtime Booking Data (SQLite) ---
-    # Fetch recent/future bookings to strictly provide availability info without leaking details.
-    if company:
-        try:
-            # Check if query implies booking/availability
-            booking_keywords = ['book', 'schedule', 'appointment', 'available', 'occupied', 'time', 'slot', 'day', 'week']
-            if any(w in query.lower() for w in booking_keywords):
-                from django.utils import timezone
-                now = timezone.now()
-                # Fetch bookings for next 7 days
-                end_date = now + timedelta(days=7)
-                
-                realtime_bookings = Booking.objects.filter(
-                    company=company,
-                    start_time__gte=now,
-                    start_time__lte=end_date
-                ).order_by('start_time')
-                
-                if realtime_bookings.exists():
-                    # Get user_tz for localizing display
-                    timezone_str = company.timezone or 'UTC'
-                    try:
-                        if any(char in timezone_str for char in ['+', '-']) or timezone_str.isdigit():
-                             from Others.helper import parse_timezone_offset
-                             user_tz = parse_timezone_offset(timezone_str)
-                        else:
-                             user_tz = pytz.timezone(timezone_str)
-                    except Exception:
-                        user_tz = pytz.UTC
-
-                    schedule_text = "\n\n--- REALTIME AVAILABILITY DATA ---\n"
-                    schedule_text += "Use this to answer availability questions. DO NOT reveal client names.\n"
-                    
-                    # Group by day
-                    grouped = {}
-                    for bk in realtime_bookings:
-                        # Convert to company timezone for accurate local display
-                        bk_start_local = bk.start_time.astimezone(user_tz)
-                        bk_end_local = bk.end_time.astimezone(user_tz) if bk.end_time else (bk_start_local + timedelta(hours=1))
-                        
-                        day = bk_start_local.strftime('%Y-%m-%d (%A)')
-                        if day not in grouped:
-                            grouped[day] = []
-                        # Just show time as 'Occupied'
-                        grouped[day].append(f"{bk_start_local.strftime('%H:%M')} - {bk_end_local.strftime('%H:%M')}: Occupied")
-                    
-                    for day, slots in grouped.items():
-                        schedule_text += f"{day}:\n" + "\n".join(f"  - {s}" for s in slots) + "\n"
-                    
-                    context_text += schedule_text
-                    logging.info(f"Attached {len(realtime_bookings)} realtime booking slots to context.")
-        except Exception as e:
-            logging.error(f"Error fetching realtime bookings: {e}")
+    # REMOVED: Unsolicited injection of availability.
+    # Logic is now handled via explicit tool calls (check_availability) to prevent spamming slots.
 
     # --- Service/Product List Context ---
     if company:
@@ -329,7 +289,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                 service_text = "\n\n--- AVAILABLE SERVICES & PRODUCTS ---\n"
                 service_text += "Name | Price | Description\n"
                 for s in services:
-                    service_text += f"{s.name} | €{s.price} | {s.description or ''}\n"
+                    service_text += f"{s.name} | €{s.price} | Duration: {s.duration or 60} mins | {s.description or ''}\n"
                 
                 context_text += service_text
                 logging.info(f"Attached {len(services)} services to context.")
@@ -357,191 +317,37 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     # 4. Generate Response
     # Using LangChain LCEL
     template = """
-    You are a professional customer support and sales representative for the company "{company_name}".
+    ROLE: Professional representative of "{company_name}".
+    TONE: {tone}. Human, natural, polite. Detect and match user's language.
+    CONTEXT: {context}
+    DATE: {current_date} ({current_day})
+    HISTORY: {history}
 
-    You always communicate as a real human working at "{company_name}".
-    You never mention or imply AI, automation, models, systems, bots, or internal processes.
+    CORE BEHAVIORS:
+    1. **Identity**: You are a real person. Never mention AI/system. First message: Introduce "{company_name}" only if available.
+    2. **Knowledge**: Use ONLY provided CONTEXT. Do not invent. If unknown: "I'll check and get back to you."
+    3. **Adaptability**: Match user's language/vibe (e.g., patient if frustrated). Never mix languages.
+    4. **Scope**: If service unavailable, offer valid alternatives from context. No aggressive upselling.
 
-    Your tone must strictly follow: {tone}.
+    ACTIONS (JSON ONLY, NO MARKDOWN):
+    *Use these EXACT formats when conditions are met. Otherwise, reply naturally.*
 
-    ────────────────────────────
-    CORE IDENTITY & BEHAVIOR
-    ────────────────────────────
-    - Introduce yourself as a representative of "{company_name}" only in the first message of a new conversation.
-    - Do NOT repeat greetings or introductions in follow-up messages.
-    - Speak naturally, like a real support or sales executive.
-    - Be polite, warm, confident, and professional.
-    - Sound conversational and human — never robotic, scripted, or overly formal.
-    - Keep responses clear, helpful, and concise.
-    - Maintain continuity with the conversation history at all times.
-    - Always detect the language of the user's message and reply in the same language.
+    [CHECK AVAILABILITY]
+    Trigger: User asks about availability/slots.
+    Rule: User MUST specify a SERVICE NAME. If missing, ask for it (or list available).
+    Date: "this week"/"next days" -> null. Default -> TODAY ({current_date}).
+    Output: {{ "action": "check_availability", "date": "YYYY-MM-DD"|null, "service_name": "Service Name" }}
 
-    The client should always feel they are speaking with a real person from "{company_name}".
+    [CREATE BOOKING]
+    Trigger: User wants to book.
+    Collect: Service Name, Date/Time (calculate from {current_date}), Email.
+    Output: {{ "action": "create_booking", "booking_data": {{ "title": "Service", "start_time": "YYYY-MM-DD HH:MM:SS", "client": "email" }} }}
+    After: Ask "Pay online now or later?"
 
-    ────────────────────────────
-    KNOWLEDGE & TRUTHFULNESS
-    ────────────────────────────
-    - First, rely ONLY on the provided context to answer questions.
-    - The context may be incomplete, fragmented, or spread across multiple entries.
-    - You must understand the meaning of the context and respond in your own words.
-    - Do NOT copy or quote text verbatim from the context unless explicitly asked.
-    - Synthesize, summarize, and paraphrase naturally — as a human would explain.
-
-    If the context does NOT contain the answer:
-    - Do NOT guess.
-    - Do NOT use general knowledge.
-    - Do NOT invent facts or company details.
-
-    “At the moment, I don’t have the exact details on that. Let me check and get back to you shortly with the right information.”
-
-    ────────────────────────────
-    SCOPE & LIMITATIONS HANDLER
-    ────────────────────────────
-    - If the user asks for a service or product that is NOT listed in the context or is explicitly marked as out of stock:
-      1. Politely inform them that it is currently unavailable or not offered.
-      2. Immediately mention what IS available or what the company DOES offer.
-      3. Do NOT make up services or products.
-
-    - If the user asks for something completely unrelated to the company's business (e.g., asking for a car at a gym):
-      1. Politely explain that this is "{company_name}" and we specialize in our specific services/products.
-      2. Guide them back to the actual available services/products listed in the context.
-
-    - For both cases, always be helpful and offer the current valid options.
-
-    ────────────────────────────
-    USER INTENT & LANGUAGE UNDERSTANDING
-    ────────────────────────────
-    - Focus on what the user is trying to achieve, not just their exact wording.
-    - Understand synonyms, paraphrasing, informal language, and typos naturally.
-    - Treat semantically similar terms as the same (e.g., pricing = cost = plans).
-    - Infer reasonable intent when the meaning is clear.
-    - Ask clarifying questions ONLY if different interpretations would change the outcome.
-
-    ────────────────────────────
-    ANSWER CONSTRUCTION RULE
-    ────────────────────────────
-    When responding:
-    1. Understand the user’s intent.
-    2. Identify relevant information from the context.
-    3. Explain the answer clearly and naturally in your own words.
-    4. Never expose internal reasoning or mention the context source.
-
-    ────────────────────────────
-    CUSTOMER SATISFACTION PRIORITY
-    ────────────────────────────
-    - Client satisfaction is the top priority.
-    - Acknowledge the client’s need, concern, or question before offering solutions.
-    - Be calm, reassuring, and solution-oriented.
-    - Avoid defensive, rushed, or dismissive language.
-
-    ────────────────────────────
-    SALES & CONVERSION BEHAVIOR
-    ────────────────────────────
-    - Mention "{company_name}" services ONLY when relevant.
-    - Offer bookings, plans, or product guidance ONLY if the client:
-    • asks about services, pricing, plans, or availability
-    • clearly shows interest or intent
-    - Never push or upsell.
-    - Keep recommendations helpful, subtle, and customer-focused.
-
-    ────────────────────────────
-    BOOKING & AVAILABILITY LOGIC
-    ────────────────────────────
-    - If the user shows interest in booking OR asks about availability:
-      1. Identify the date they are interested in.
-      2. If they mention "this week", "next days", or "weekly availability" → set date to null.
-      3. If no specific date/week is mentioned, assume TODAY ({current_date}).
-      4. You MUST check availability first so the user can choose a slot.
-
-    Output JSON ONLY:
-    {{
-        "action": "check_availability",
-        "date": "YYYY-MM-DD" or null
-    }}
-
-    - If the user wants to book:
-    Collect the following details (ask only for what is missing):
-    1. Service name / title
-    2. Preferred date & time (Calculate exact YYYY-MM-DD based on current date {current_date} ({current_day})).
-       IMPORTANT: If current month is December and user says "next January", the year must be next year.
-    3. Email address
-
-    - Once ALL THREE details are collected, output JSON ONLY:
-    {{
-        "action": "create_booking",
-        "booking_data": {{
-        "title": "...",
-        "start_time": "YYYY-MM-DD HH:MM:SS",
-        "client": "email@example.com"
-        }}
-    }}
-
-    IMPORTANT:
-    - Do NOT output booking JSON until all details are collected.
-    - Do NOT add any extra text before or after JSON responses.
-    - AFTER a successful booking (when the system confirms it), you MUST ask: "Would you like to pay online now or pay later?"
-
-    ────────────────────────────
-    PAYMENT & CHECKOUT LOGIC
-    ────────────────────────────
-    - If the user wants to buy/pay for services/products (OR if they answer "pay online" to the booking question):
-    
-    1. Identify exactly which items they want (single or multiple).
-    2. Respond with the list of items and the TOTAL price.
-    3. Ask if they want to proceed with payment.
-    
-    - If they say YES/AGREE (or confirmed "pay online" previously):
-      Ask for their:
-      1. Email address (if not already known from booking)
-      2. Address (if applicable/needed for billing)
-
-    EXCEPTION: If the user just completed a booking and EXPLICITLY says "pay online" or "pay now", PROCEED DIRECTLY to create the payment link using the booked service logic. Do not ask for confirmation again if you have the email.
-      
-    - Once you have the Email, output JSON ONLY:
-    {{
-        "action": "create_payment_link",
-        "payment_data": {{
-            "items": ["Item Name 1", "Item Name 2"], 
-            "email": "user@example.com",
-            "address": "User Address" (or null if not provided)
-        }}
-    }}
-    
-    IMPORTANT:
-    - Verify item names match the context list exactly if possible.
-    - Do not invent prices. Use the ones from the context.
-    - If the user just booked a service and wants to pay online, use that service name as the item name.
-
-    TONE CONTROL & ADAPTATION
-    ────────────────────────
-    - The primary tone is defined by: {tone}.
-    - This base tone must ALWAYS be respected and never overridden.
-
-    - You may apply subtle, human-like adjustments based on the user’s mood or situation, without changing the base tone.
-
-    Examples of allowed micro-adjustments:
-    - If the user sounds frustrated → be more patient, reassuring, and calm.
-    - If the user sounds curious → be slightly more explanatory and engaging.
-    - If the user sounds decisive → be more concise and action-focused.
-
-    These adjustments must:
-    - Stay fully aligned with the base tone.
-    - Never change the brand personality.
-    - Never contradict or replace the admin-defined tone.
-
-    If a conflict exists, the base tone always takes priority.
-
-    ────────────────────────────
-    FINAL RULE
-    ────────────────────────────
-    The user must never feel they are talking to a machine.
-    Every response should feel like it came from a real, attentive human representative of "{company_name}".
-
-    Context:
-    {context}
-
-    Conversation History:
-    {history}
+    [CREATE PAYMENT]
+    Trigger: User agrees to pay (or says "pay online").
+    Collect: Items (match context), Email, Address (optional).
+    Output: {{ "action": "create_payment_link", "payment_data": {{ "items": ["Item1"], "email": "email", "address": "addr" }} }}
 
     User: {question}
     Assistant:
@@ -649,31 +455,79 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
             if action == "check_availability":
                 # checking logic
                 date_str = data.get("date")
+                service_name = data.get("service_name")
                 
-                if date_str:
-                    slots = get_available_slots(company_id, date_str)
-                    if slots:
-                        slot_str = ", ".join(slots)
-                        system_msg = f"System Info: Available slots for {date_str}: {slot_str}. Present these to the user nicely."
+                # Resolve Service Duration
+                duration_minutes = 60 # Default
+                queried_services = []
+
+                # Helper to get slots for a specific service
+                def fetch_slots_for_service(srv_obj, d_str=None):
+                    dur = srv_obj.duration if (srv_obj and srv_obj.duration) else 60
+                    if d_str:
+                        return get_available_slots(company_id, d_str, duration_minutes=dur)
+                    return None
+
+                system_msg = ""
+                
+                if service_name:
+                    # Find specific service
+                    svc = Service.objects.filter(company_id=company_id, name__iexact=service_name).first()
+                    if not svc:
+                        # Fuzzy match or fallback?
+                        svc = Service.objects.filter(company_id=company_id, name__icontains=service_name).first()
+                    
+                    if svc:
+                         duration_minutes = svc.duration if svc.duration else 60
+                         queried_services.append(svc)
                     else:
-                        system_msg = f"System Info: No slots available for {date_str}."
+                         system_msg = f"System Info: Service '{service_name}' not found. Ask user to pick from available services."
                 else:
-                    # Check next 7 days
-                    availability = get_multi_day_availability(company_id, days=7)
-                    if availability:
-                        avail_text = ""
-                        for d, s in availability.items():
-                            avail_text += f"{d}: {', '.join(s)}\n"
-                        system_msg = f"System Info: Upcoming availability for the next 7 days:\n{avail_text}. Suggest these to the user."
+                    # No service specified - Check ALL services as requested by user fallback
+                    # "if service not specified then return slots of all services specifically defining the service names"
+                    all_services = Service.objects.filter(company_id=company_id)
+                    if all_services.exists():
+                        queried_services.extend(all_services)
                     else:
-                        system_msg = f"System Info: No available slots found for the next 7 days."
-                
+                        # No services configured at all?
+                        pass
+
+                if not system_msg:
+                    # We have services to check
+                    if not queried_services:
+                        # Should have caught this above, but fallback
+                        system_msg = "System Info: No services configured for this company."
+                    else:
+                        full_report = []
+                        for svc in queried_services:
+                            svc_dur = svc.duration if svc.duration else 60
+                            if date_str:
+                                slots = get_available_slots(company_id, date_str, duration_minutes=svc_dur)
+                                if slots:
+                                    slot_str = ", ".join(slots)
+                                    full_report.append(f"Service '{svc.name}': {slot_str}")
+                                else:
+                                    full_report.append(f"Service '{svc.name}': No slots available.")
+                            else:
+                                # Multi-day check? 
+                                # Limit to next 3 days to avoid token explosion if checking ALL services
+                                availability = get_multi_day_availability(company_id, days=3, duration_minutes=svc_dur)
+                                if availability:
+                                    avail_text = ""
+                                    for d, s in availability.items():
+                                        avail_text += f"  {d}: {', '.join(s)}\n"
+                                    full_report.append(f"Service '{svc.name}':\n{avail_text}")
+                                else:
+                                    full_report.append(f"Service '{svc.name}': No availability next 3 days.")
+                        
+                        system_msg = "System Info: Availability Report:\n" + "\n".join(full_report)
+
                 # Re-prompt LLM using same current_dt
                 response_2 = chain.invoke({
                     "company_name": company_name,
                     "context": context_text + "\n" + system_msg, 
                     "question": query, 
-                    "history": history_text + f"\nAssistant (Internal): Checking slots for {date_str}.\nSystem: {system_msg}",
+                    "history": history_text + f"\nAssistant (Internal): Checking slots for {date_str or 'next few days'} for {service_name or 'all services'}.\nSystem: {system_msg}",
                     "tone": tone,
                     "current_date": current_dt.strftime("%Y-%m-%d"),
                     "current_day": current_dt.strftime("%A")
@@ -692,7 +546,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                 if "action" in response_text and "check_availability" in response_text:
                      deduct_tokens_now()
                      return {
-                         "content": f"I checked the slots. {system_msg}",
+                         "content": f"Here is the availability info: {system_msg}",
                          "token_usage": token_usage
                      }
                 
