@@ -7,7 +7,6 @@ __pycache__/
 *.pyo
 *.pyd
 *.pdb
-*.db
 *.sqlite3
 *.sqlite3-journal
 
