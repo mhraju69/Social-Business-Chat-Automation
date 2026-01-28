@@ -116,6 +116,9 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
                  b_end = b_start + timedelta(hours=1)
             booked_ranges.append((b_start, b_end))
             
+        # Get Booking Limit
+        concurrent_limit = getattr(company, 'concurrent_booking_limit', 1)
+
         # Generate Slots (Hourly) based on all opening hour ranges for the day
         slots = []
         for hours in hours_qs:
@@ -124,13 +127,16 @@ def get_available_slots(company_id: int, date_str: str = None) -> List[str]:
             
             while current + timedelta(hours=1) <= day_end:
                 slot_end = current + timedelta(hours=1)
-                is_taken = False
-                for b_start, b_end in booked_ranges:
-                    if current < b_end and slot_end > b_start:
-                        is_taken = True
-                        break
                 
-                if not is_taken:
+                # Count overlaps
+                overlap_count = 0
+                for b_start, b_end in booked_ranges:
+                     # Check if time ranges overlap
+                     # (StartA < EndB) and (EndA > StartB)
+                    if current < b_end and slot_end > b_start:
+                        overlap_count += 1
+                
+                if overlap_count < concurrent_limit:
                     # Don't show past slots
                     if current > now_local:
                         slots.append(current.strftime("%I:%M %p")) 
@@ -441,10 +447,11 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     ────────────────────────────
     BOOKING & AVAILABILITY LOGIC
     ────────────────────────────
-    - If the user shows interest in booking → ask if they would like to book an appointment.
-    - If the user asks about availability (specific day or general "when are you free"):
-    If they ask for today or a specific date, provide that date. 
-    If they ask generally, set date to null to check the next 7 days.
+    - If the user shows interest in booking OR asks about availability:
+      1. Identify the date they are interested in.
+      2. If they mention "this week", "next days", or "weekly availability" → set date to null.
+      3. If no specific date/week is mentioned, assume TODAY ({current_date}).
+      4. You MUST check availability first so the user can choose a slot.
 
     Output JSON ONLY:
     {{
@@ -700,21 +707,41 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                 booking_details = data.get("booking_data")
                 
                 # Validation: Prevent past bookings
+                # Validation: Prevent past bookings
                 start_time_str = booking_details.get("start_time")
                 if start_time_str:
                     try:
                          # Handle typical format "YYYY-MM-DD HH:MM:SS"
-                         s_time = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
-                         if s_time < datetime.now():
-                             deduct_tokens_now()
-                             return {
-                                 "content": f"I cannot book appointments in the past ({start_time_str}). Please search for a future time slot.",
-                                 "token_usage": token_usage
-                             }
-                    except ValueError:
+                         # Parse naive datetime from user input
+                         try:
+                             s_time_naive = datetime.strptime(start_time_str, "%Y-%m-%d %H:%M:%S")
+                         except ValueError:
+                             try:
+                                s_time_naive = datetime.strptime(start_time_str, "%Y-%m-%dT%H:%M:%S")
+                             except ValueError:
+                                s_time_naive = None
+                         
+                         if s_time_naive:
+                             # Localize to company timezone (user_tz is defined in outer scope)
+                             if django_timezone.is_naive(s_time_naive):
+                                 s_time_aware = user_tz.localize(s_time_naive)
+                             else:
+                                 s_time_aware = s_time_naive.astimezone(user_tz)
+                             
+                             # Compare with current UTC time
+                             now_aware = django_timezone.now()
+                             
+                             if s_time_aware < now_aware:
+                                 deduct_tokens_now()
+                                 return {
+                                     "content": f"I cannot book appointments in the past ({start_time_str}). Please search for a future time slot.",
+                                     "token_usage": token_usage
+                                 }
+                    except Exception as e:
                         # If format is weird, maybe let backend handle or fail safe?
-                        # Let's try flexible parsing or just proceed to backend which might error out
+                        logger.error(f"Date validation error: {e}")
                         pass
+
 
                 # Create Mock Request
                 mock_req = MockRequest(data=booking_details)
