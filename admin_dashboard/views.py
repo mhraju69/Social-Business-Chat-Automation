@@ -68,10 +68,11 @@ class DashboardView(generics.GenericAPIView):
         total_user = User.objects.count()
         active_integrations = ChatProfile.objects.filter(bot_active=True).count()
         new_companies = Company.objects.filter(created_at__gte=datetime.date.today()).count()
-        earnings_today = Payment.objects.filter(created_at__date=datetime.date.today()).aggregate(total_earnings=models.Sum('amount'))['total_earnings'] or 0
+        earnings_today = Payment.objects.filter(created_at__date=datetime.date.today(), status='success').aggregate(total_earnings=models.Sum('amount'))['total_earnings'] or 0
         net_profit_this_month = Payment.objects.filter(
             created_at__year=datetime.date.today().year,
-            created_at__month=datetime.date.today().month
+            created_at__month=datetime.date.today().month,
+            status='success'
         ).aggregate(total_earnings=models.Sum('amount'))['total_earnings'] or 0
 
         tickets = SupportTicket.objects.filter(
@@ -87,7 +88,7 @@ class DashboardView(generics.GenericAPIView):
             month = month_date.month
             year = month_date.year
             month_users = User.objects.filter(date_joined__month=month, date_joined__year=year).count()
-            month_revenue = Payment.objects.filter(created_at__month=month, created_at__year=year).aggregate(total_revenue=Sum('amount'))['total_revenue'] or 0
+            month_revenue = Payment.objects.filter(created_at__month=month, created_at__year=year, status='success').aggregate(total_revenue=Sum('amount'))['total_revenue'] or 0
             month_cost = 0  # Placeholder for cost calculation
             chart_data.append({
                 'month': month_name,
@@ -429,8 +430,8 @@ class PerformanceAnalyticsAPIView(generics.GenericAPIView):
 
         total_message_sent = ChatMessage.objects.filter(type='outgoing', created_at__gte=data_date_start_date).count()
         total_message_received = ChatMessage.objects.filter(type='incoming', created_at__gte=data_date_start_date).count()
-        monthly_revenue = Payment.objects.filter(created_at__gte=data_date_start_date).aggregate(total=Sum('amount'))['total'] or 0
-        total_revenue = Payment.objects.aggregate(total=Sum('amount'))['total'] or 0
+        monthly_revenue = Payment.objects.filter(created_at__gte=data_date_start_date, status='success').aggregate(total=Sum('amount'))['total'] or 0
+        total_revenue = Payment.objects.filter(status='success').aggregate(total=Sum('amount'))['total'] or 0
 
         if time_scope == 'today':
             previous_date = today_start - timedelta(days=1)
@@ -442,7 +443,7 @@ class PerformanceAnalyticsAPIView(generics.GenericAPIView):
         # previous month data
         message_sent_prev = ChatMessage.objects.filter(type='outgoing', created_at__gte=previous_date, created_at__lt=data_date_start_date).count()
         message_received_prev = ChatMessage.objects.filter(type='incoming', created_at__gte=previous_date, created_at__lt=data_date_start_date).count()
-        monthly_revenue_prev = Payment.objects.filter(created_at__gte=previous_date, created_at__lt=data_date_start_date).aggregate(total=Sum('amount'))['total'] or 0
+        monthly_revenue_prev = Payment.objects.filter(created_at__gte=previous_date, created_at__lt=data_date_start_date, status='success').aggregate(total=Sum('amount'))['total'] or 0
 
         data = {
             "total_message_sent": {

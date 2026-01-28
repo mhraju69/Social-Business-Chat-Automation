@@ -378,12 +378,8 @@ def create_booking(request,company_id,data=None):
             end_dt = end_time_local
         
         if end_dt:
-            if timezone.is_naive(end_dt):
-                end_aware = user_tz.localize(end_dt)
-            else:
-                end_aware = end_dt.astimezone(user_tz)
-            
-            end_utc = end_aware.astimezone(pytz.UTC)
+            # Convert local time to UTC using utility function
+            end_utc = local_to_utc(end_dt, timezone_str)
             
             # Update data with UTC time for DB saving
             data['end_time'] = end_utc
