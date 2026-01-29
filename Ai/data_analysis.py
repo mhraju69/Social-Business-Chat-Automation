@@ -134,15 +134,11 @@ def extract_semantic_data(text: str) -> Dict[str, Any]:
           "end": "string"    # e.g., '17:00'
         }}
       ],
+      ],
       "policies": [
         {{
           "type": "string",  # 'cancellation' | 'refund' | 'privacy' | 'terms' | 'other'
           "explicit": boolean
-        }}
-      ],
-      "faqs": [
-        {{
-          "question": "string" # The full question text
         }}
       ]
     }}
@@ -151,7 +147,6 @@ def extract_semantic_data(text: str) -> Dict[str, Any]:
     - Only set fields to true or add items if they are EXPLICITLY FOUND in the text.
     - Do NOT HALLUCINATE or guess.
     - For 'services', duplicate names are okay (deduplication happens later).
-    - For 'faqs', only extract explicit Question-Answer pairs (or clear list of questions that imply FAQs).
     - Return ONLY the JSON object.
     """
 
@@ -203,7 +198,6 @@ def aggregate_counts(extracted_data_list: List[Dict[str, Any]]) -> Dict[str, Any
     services_map: Dict[str, Dict[str, bool]] = {}
     opening_hours_set: Set[Tuple[str, str, str]] = set()
     policies_set: Set[str] = set()
-    faqs_set: Set[str] = set()
     
     for data in extracted_data_list:
         if not data:
@@ -243,12 +237,6 @@ def aggregate_counts(extracted_data_list: List[Dict[str, Any]]) -> Dict[str, Any
             p_type = pol.get("type", "")
             if p_type and pol.get("explicit"):
                 policies_set.add(normalize_text(p_type))
-                
-        # FAQs
-        for faq in data.get("faqs", []):
-            q = faq.get("question", "")
-            if q:
-                faqs_set.add(normalize_text(q))
 
     # Calculate final counts
     company_info_count = sum(1 for v in company_info_flags.values() if v)
@@ -256,7 +244,6 @@ def aggregate_counts(extracted_data_list: List[Dict[str, Any]]) -> Dict[str, Any
     prices_count = sum(1 for s in services_map.values() if s["has_price"])
     opening_hours_count = len(opening_hours_set)
     policies_count = len(policies_set)
-    faqs_count = len(faqs_set)
     
     return {
         "counts": {
@@ -264,8 +251,7 @@ def aggregate_counts(extracted_data_list: List[Dict[str, Any]]) -> Dict[str, Any
             "services": services_count,
             "prices": prices_count,
             "openingHours": opening_hours_count,
-            "policies": policies_count,
-            "faqs": faqs_count
+            "policies": policies_count
         },
         "details": {
             "missing_company_info": [k for k, v in company_info_flags.items() if not v],
@@ -278,9 +264,9 @@ def calculate_data_health(counts: Dict[str, int], details: Dict[str, Any]) -> Di
     score = 0
     suggestions = []
     
-    # 1. Company Info (Max 10)
+    # 1. Company Info (Max 20)
     c_count = counts["companyInfo"]
-    score += (c_count * 2) 
+    score += (c_count * 4) 
     if c_count < 5:
         missing = details.get("missing_company_info", [])
         for m in missing:
@@ -309,23 +295,17 @@ def calculate_data_health(counts: Dict[str, int], details: Dict[str, Any]) -> Di
         else:
             suggestions.append("Pricing")
     
-    # 4. Opening Hours (Max 10)
+    # 4. Opening Hours (Max 15)
     if counts["openingHours"] > 0:
-        score += 10
+        score += 15
     else:
         suggestions.append("Hours")
         
-    # 5. Policies (Max 10)
+    # 5. Policies (Max 15)
     if counts["policies"] > 0:
-        score += 10
+        score += 15
     else:
         suggestions.append("Policies")
-        
-    # 6. FAQs (Max 20)
-    if counts["faqs"] > 0:
-        score += 20
-    else:
-        suggestions.append("FAQs")
 
     if score >= 90:
         reasoning = "Excellent data coverage. Your AI is ready to train."
@@ -336,10 +316,15 @@ def calculate_data_health(counts: Dict[str, int], details: Dict[str, Any]) -> Di
     else:
         reasoning = "Poor data health. Please add more business details."
 
+    if score > 80:
+        summary_text = f"Your AI knowledge is {score}% complete. You are ready to go!"
+    else:
+        summary_text = f"Your AI knowledge is {score}% complete. Add missing information to improve customer interactions."
+
     return {
         "score": score,
         "reasoning": reasoning,
-        "summary": f"Your AI knowledge is {score}% complete. Add missing information to improve customer interactions.",
+        "summary": summary_text,
         "enrichmentSuggestions": sorted(list(set(suggestions)))
     }
 
@@ -375,7 +360,7 @@ def analyze_company_data(company_id: int, force_refresh: bool = False) -> Dict[s
         logger.error(f"Failed to fetch data from Qdrant: {e}")
         return {
             "companyId": str(company_id),
-            "counts": {"companyInfo": 0, "services": 0, "prices": 0, "openingHours": 0, "policies": 0, "faqs": 0},
+            "counts": {"companyInfo": 0, "services": 0, "prices": 0, "openingHours": 0, "policies": 0},
             "missingOrSuggestedData": ["System Error"],
             "dataHealth": {"score": 0, "reasoning": f"DB Error: {str(e)}", "enrichmentSuggestions": []}
         }
@@ -384,7 +369,7 @@ def analyze_company_data(company_id: int, force_refresh: bool = False) -> Dict[s
         # If no data found in Qdrant, return 0s
         empty_result = {
             "companyId": str(company_id),
-            "counts": {"companyInfo": 0, "services": 0, "prices": 0, "openingHours": 0, "policies": 0, "faqs": 0},
+            "counts": {"companyInfo": 0, "services": 0, "prices": 0, "openingHours": 0, "policies": 0},
             "missingOrSuggestedData": ["No data found in Vector Index"],
             "dataHealth": {"score": 0, "reasoning": "No knowledge data found.", "enrichmentSuggestions": ["Sync your data to the AI Knowledge Base"]}
         }
