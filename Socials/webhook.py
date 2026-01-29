@@ -102,6 +102,19 @@ def unified_webhook(request, platform):
                     print(f"❌ [Facebook] Token count check failed for Company {profile.user.company.id}")
                     return JsonResponse({"status": "error", "message": "Token limit reached."}, status=400)
 
+                # Fetch user name from Facebook Graph API
+                try:
+                    user_url = f"https://graph.facebook.com/{client_id}?fields=first_name,last_name,name&access_token={profile.access_token}"
+                    user_res = requests.get(user_url)
+                    if user_res.status_code == 200:
+                        user_data = user_res.json()
+                        name = user_data.get("name") or f"{user_data.get('first_name','')} {user_data.get('last_name','')}"
+                        print(f"✅ [Facebook] Fetched user name: {name}")
+                    else:
+                        print(f"⚠️ [Facebook] Failed to fetch user name: {user_res.text}")
+                except Exception as e:
+                    print(f"❌ [Facebook] Error fetching user profile: {e}")
+
             elif platform == "instagram":
                 entry = data.get("entry", [])
                 if not entry:
@@ -155,6 +168,11 @@ def unified_webhook(request, platform):
                     "name": name
                 }
             )
+            
+            # Update name if fetched and different
+            if name != "Unknown" and client_obj.name != name:
+                client_obj.name = name
+                client_obj.save(update_fields=["name"])
             room, _ = ChatRoom.objects.get_or_create(profile=profile, client=client_obj)
 
             # CRITICAL FIX: Check for stuck state BEFORE updating the timestamp

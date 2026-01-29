@@ -9,7 +9,7 @@ class UpdateLastActiveMiddleware:
 
     def __call__(self, request):
         # Skip middleware for specific paths
-        excluded_substrings = ['get-otp', 'verify-otp', 'login', 'docs', 'schema']
+        excluded_substrings = ['get-otp', 'verify-otp', 'login', 'docs', 'schema','reset-password']
         if any(path in request.path for path in excluded_substrings) or request.path.rstrip('/') == '/api':
             print("Skipping middleware for path:", request.path)
             return self.get_response(request)
