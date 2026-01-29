@@ -13,6 +13,14 @@ if not settings.configured:
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'Talkfusion.settings')
     django.setup()
 
+# Override Cache to use Local Memory instead of Redis (which might be down)
+settings.CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "unique-snowflake",
+    }
+}
+
 from Ai.data_analysis import analyze_company_data
 
 def main():
