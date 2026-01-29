@@ -16,11 +16,13 @@ def create_stripe_checkout_for_service(
     ):
     try:
         company = Company.objects.get(id=company_id)
+        if not company.stripe_customer_id:
+            raise ValueError("Company is unable to receive payments due to missing Stripe customer ID")
     except Company.DoesNotExist:
         raise ValueError("Company not found")
     
     if not company.stripe_payment_method_id:
-        raise ValueError("Company has no payment method")
+        raise ValueError("Company is unable to receive payments due to missing Stripe payment method")
     
     stripe_client, api_key, webhook_secret = get_stripe_client()
     stripe_client.api_key = api_key

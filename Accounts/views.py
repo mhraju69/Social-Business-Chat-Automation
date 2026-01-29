@@ -193,11 +193,7 @@ class AddEmployeeView(APIView):
 
         if not check_plan(company):
             return Response({'error': 'No valid plan found'}, status=404)
-        
-        # Logic fixed: return error if limit is reached or exceeded
-        if len(employees) >= plan.plan.user_limit:
-            return Response({'error': 'User limit exceeded, please upgrade your plan to add more Employees.'}, status=400)
-        
+              
         employee_data = []
         for emp in employees:
             employee_data.append({
@@ -338,6 +334,14 @@ class UpdatePermissionsView(APIView):
         employee.save()
 
         return Response(EmployeeSerializer(employee).data,status=status.HTTP_200_OK)
+
+    def delete(self, request,employee_id):
+        target_user = get_company_user(request.user)
+        employee = Employee.objects.filter(id=employee_id, company__user=target_user).first()
+        if not employee:
+            return Response({"detail": "Employee not found."}, status=404)
+        employee.delete()
+        return Response({"detail": "Employee deleted successfully."}, status=status.HTTP_200_OK)
 
 class SocialAuthCallbackView(APIView):
     permission_classes = [permissions.AllowAny]
