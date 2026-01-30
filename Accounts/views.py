@@ -316,6 +316,7 @@ class UpdatePermissionsView(APIView):
         # Extract target employee email and new roles
         employee = Employee.objects.filter(id=employee_id, company__user=target_user).first()
         new_roles = request.data.get("roles")
+        print(new_roles,employee)
 
         if not employee or not new_roles:
             return Response(
