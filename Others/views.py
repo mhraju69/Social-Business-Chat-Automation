@@ -303,6 +303,8 @@ class UserActivityLogView(APIView):
         tracked_models = [
             {'model': 'Service', 'app': 'Accounts'},
             {'model': 'Company', 'app': 'Accounts'},
+            {'model': 'Subscriptions', 'app': 'Finance'},
+            {'model': 'Payment', 'app': 'Finance'},
         ]
         
         for tracked in tracked_models:
