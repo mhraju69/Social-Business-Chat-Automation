@@ -68,7 +68,7 @@ def create_stripe_checkout_for_service(
 
     # ---------------- CREATE STRIPE CHECKOUT ----------------
     checkout_args = {
-        "payment_method_types": ["card"],
+        "payment_method_types": ["card", "paypal"],
         "line_items": [{"price_data": price_data, "quantity": 1}],
         "mode": "payment",
         "success_url": success_url,
@@ -193,7 +193,7 @@ def create_stripe_checkout_for_subscription(
 
     # ---------------- CREATE STRIPE CHECKOUT ----------------
     checkout_args = {
-        "payment_method_types": ["card"],
+        "payment_method_types": ["card", "paypal"],
         "line_items": [{"price": plan.stripe_price_id, "quantity": 1}],
         "mode": "subscription", # Changed from 'payment' to 'subscription'
         "success_url": success_url, # Update with your real URLs
@@ -203,6 +203,7 @@ def create_stripe_checkout_for_subscription(
             "metadata": metadata,
         },
         "customer": company.stripe_customer_id,
+        # "payment_method_configuration": "pmc_1SvhuXFPR57bIAX4WW1IGdWq",
     }
 
     session = stripe_client.checkout.Session.create(**checkout_args)
