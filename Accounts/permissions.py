@@ -105,64 +105,118 @@ class IsOwnerOrEmployee(BasePermission):
 class IsEmployeeAndCanViewDashboard(BasePermission):
     def has_permission(self, request, view):
         user = request.user
-        # Only check if the user is an employee
-        if hasattr(user, 'employee'):
-            return user.employee.can_view_dashboard()
-        # Non-employees have full access
+        if not user or not user.is_authenticated:
+            return False
+        if user.role == 'employee':
+            from .models import Employee
+            try:
+                employee = Employee.objects.get(email=user.email)
+                return employee.can_view_dashboard()
+            except Employee.DoesNotExist:
+                return False
         return True
 
 
 class IsEmployeeAndCanManageUsers(BasePermission):
     def has_permission(self, request, view):
         user = request.user
-        if hasattr(user, 'employee'):
-            return user.employee.can_manage_users()
+        if not user or not user.is_authenticated:
+            return False
+        if user.role == 'employee':
+            from .models import Employee
+            try:
+                employee = Employee.objects.get(email=user.email)
+                return employee.can_manage_users()
+            except Employee.DoesNotExist:
+                return False
         return True
 
 
 class IsEmployeeAndCanAccessFinancialData(BasePermission):
     def has_permission(self, request, view):
         user = request.user
-        if hasattr(user, 'employee'):
-            return user.employee.can_access_financial_data()
+        if not user or not user.is_authenticated:
+            return False
+        if user.role == 'employee':
+            from .models import Employee
+            try:
+                employee = Employee.objects.get(email=user.email)
+                return employee.can_access_financial_data()
+            except Employee.DoesNotExist:
+                return False
         return True
 
 
 class IsEmployeeAndCanAccessCustomerSupport(BasePermission):
     def has_permission(self, request, view):
         user = request.user
-        if hasattr(user, 'employee'):
-            return user.employee.can_access_customer_support()
+        if not user or not user.is_authenticated:
+            return False
+        if user.role == 'employee':
+            from .models import Employee
+            try:
+                employee = Employee.objects.get(email=user.email)
+                return employee.can_access_customer_support()
+            except Employee.DoesNotExist:
+                return False
         return True
 
 
 class IsEmployeeAndCanAccessBillingInvoices(BasePermission):
     def has_permission(self, request, view):
         user = request.user
-        if hasattr(user, 'employee'):
-            return user.employee.can_access_billing_invoices()
+        if not user or not user.is_authenticated:
+            return False
+        if user.role == 'employee':
+            from .models import Employee
+            try:
+                employee = Employee.objects.get(email=user.email)
+                return employee.can_access_billing_invoices()
+            except Employee.DoesNotExist:
+                return False
         return True
 
 
 class IsEmployeeAndCanAccessAnalyticsReports(BasePermission):
     def has_permission(self, request, view):
         user = request.user
-        if hasattr(user, 'employee'):
-            return user.employee.can_access_analytics_reports()
+        if not user or not user.is_authenticated:
+            return False
+        if user.role == 'employee':
+            from .models import Employee
+            try:
+                employee = Employee.objects.get(email=user.email)
+                return employee.can_access_analytics_reports()
+            except Employee.DoesNotExist:
+                return False
         return True
 
 
 class IsEmployeeAndCanAccessSystemSettings(BasePermission):
     def has_permission(self, request, view):
         user = request.user
-        if hasattr(user, 'employee'):
-            return user.employee.can_access_system_settings()
+        if not user or not user.is_authenticated:
+            return False
+        if user.role == 'employee':
+            from .models import Employee
+            try:
+                employee = Employee.objects.get(email=user.email)
+                return employee.can_access_system_settings()
+            except Employee.DoesNotExist:
+                return False
         return True
 
 
 class IsEmployeeAndCanManageAPI(BasePermission):
     def has_permission(self, request, view):
         user = request.user
-        if hasattr(user, 'employee'):
-            return user.employee.can_manage_api()
+        if not user or not user.is_authenticated:
+            return False
+        if user.role == 'employee':
+            from .models import Employee
+            try:
+                employee = Employee.objects.get(email=user.email)
+                return employee.can_manage_api()
+            except Employee.DoesNotExist:
+                return False
         return True
