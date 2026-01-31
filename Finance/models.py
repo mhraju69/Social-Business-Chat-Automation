@@ -50,6 +50,9 @@ class Plan(models.Model):
 
         super().save(*args, **kwargs)
 
+    history = HistoricalRecords()
+
+
 
 class Subscriptions(models.Model):
     company = models.ForeignKey(Company, related_name='subscriptions', on_delete=models.CASCADE)

@@ -9,11 +9,22 @@ from rest_framework_simplejwt.tokens import RefreshToken
 class UserSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True)
     company = serializers.SerializerMethodField()
+    image = serializers.ImageField(required=False, allow_null=True)
 
     class Meta:
         model = User
         fields = ['id', 'name', 'email', 'password', 'image', 'phone', 'role', 'dob', 'is_active', 'block', 'date_joined', 'company']
         read_only_fields = ['is_active', 'is_staff', 'is_superuser', 'date_joined','id','role', 'company']
+
+    def get_image(self, obj):
+        # This method is not strictly necessary anymore with ImageField, 
+        # but kept it here for compatibility as requested.
+        request = self.context.get('request')
+        if obj.image:
+            if request:
+                return request.build_absolute_uri(obj.image.url)
+            return obj.image.url
+        return None
 
     def create(self, validated_data):
         password = validated_data.pop('password', None)
@@ -85,8 +96,8 @@ class LoginSerializer(serializers.Serializer):
         employee = Employee.objects.filter(email__iexact=user.email).first()
         plan = Subscriptions.objects.filter(company=get_company(user)).first()
         return {
-            "user": UserSerializer(user).data,
-            "role": employee.roles if employee else None,
+            "user": UserSerializer(user, context=self.context).data,
+            "permissions": employee.roles if employee else None,
             "session_id": session.id,
             "plan": True if plan else False,
             "refresh": str(refresh),

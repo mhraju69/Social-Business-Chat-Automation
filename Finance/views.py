@@ -142,6 +142,7 @@ def stripe_webhook(request):
                 customer_id = session.get('customer')
                 if customer_id:
                     company.stripe_customer_id = customer_id
+                    company._history_user = company.user
                     company.save()
 
                 if mode == 'subscription':
@@ -149,22 +150,24 @@ def stripe_webhook(request):
                     subscription_id = session.get('subscription')
                     
                     # Create or Update Subscription record
-                    sub_obj, created = Subscriptions.objects.get_or_create(
-                        company=company,
-                        defaults={
-                            "plan": plan,
-                            "stripe_subscription_id": subscription_id,
-                            "active": True,
-                            "auto_renew": True,
-                            "start": timezone.now()
-                        }
-                    )
-                    if not created:
+                    sub_obj = Subscriptions.objects.filter(company=company).first()
+                    if not sub_obj:
+                        sub_obj = Subscriptions(
+                            company=company,
+                            plan=plan,
+                            stripe_subscription_id=subscription_id,
+                            active=True,
+                            auto_renew=True,
+                            start=timezone.now()
+                        )
+                    else:
                         sub_obj.plan = plan
                         sub_obj.stripe_subscription_id = subscription_id
                         sub_obj.active = True
                         sub_obj.start = timezone.now()
-                        sub_obj.save()
+                    
+                    sub_obj._history_user = company.user
+                    sub_obj.save()
                     
                     logger.info(f"✅ Subscription {subscription_id} activated for company {company_id}")
 
@@ -209,10 +212,11 @@ def stripe_webhook(request):
                          existing_payment.client = client_email
                     if session_url and not existing_payment.url:
                          existing_payment.url = session_url
+                    existing_payment._history_user = company.user
                     existing_payment.save()
                 else:
                     # Create a Payment record for the initial charge
-                    Payment.objects.create(
+                    payment = Payment(
                         company=company,
                         client=client_email,
                         type="subscriptions" if mode == 'subscription' else "services",
@@ -224,6 +228,8 @@ def stripe_webhook(request):
                         reason=f"Initial Subscription: {plan.name}" if mode == 'subscription' else "Service Payment",
                         payment_date=timezone.now()
                     )
+                    payment._history_user = company.user
+                    payment.save()
 
         except Exception as e:
             logger.error(f"Error processing checkout.session.completed: {e}")
@@ -248,10 +254,11 @@ def stripe_webhook(request):
                     # So we update 'start' to now (or period start) and 'end' to None to trigger recalculation.
                     sub_obj.start = timezone.now()
                     sub_obj.end = None 
+                    sub_obj._history_user = sub_obj.company.user
                     sub_obj.save()
 
                     # Record the renewal payment
-                    Payment.objects.create(
+                    payment = Payment(
                         company=sub_obj.company,
                         type="subscriptions",
                         amount=Decimal(invoice.get('amount_paid', 0)) / 100,
@@ -261,6 +268,8 @@ def stripe_webhook(request):
                         payment_date=timezone.now(),
                         invoice_url=invoice.get('hosted_invoice_url')
                     )
+                    payment._history_user = sub_obj.company.user
+                    payment.save()
                     send_alert(
                         [sub_obj.company],
                         "Subscription Renewed",
@@ -279,6 +288,7 @@ def stripe_webhook(request):
         try:
             sub_obj = Subscriptions.objects.get(stripe_subscription_id=subscription_id)
             sub_obj.active = False
+            sub_obj._history_user = sub_obj.company.user
             sub_obj.save()
             send_alert(
                 [sub_obj.company],

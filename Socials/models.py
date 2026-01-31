@@ -11,6 +11,7 @@ MESSAGE_TYPE = [
     ('outgoing', 'Outgoing'),
 ]
 
+
 class ChatProfile(models.Model):
     PLATFORM_CHOICES = [
         ('whatsapp', 'WhatsApp'),
@@ -89,6 +90,7 @@ class ChatMessage(models.Model):
 
     def __str__(self):
         return f"[{self.room.profile.platform}] {self.type} - {self.timestamp}"
+
 
 class TestChat(models.Model):
     company = models.ForeignKey('Accounts.Company', related_name='test_chats', on_delete=models.CASCADE)
