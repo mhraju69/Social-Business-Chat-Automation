@@ -556,16 +556,61 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     
     # Custom Greeting Logic
     greeting_instruction = ""
-    # Only apply strict greeting execution on the very first message
-    if (not history or len(history) == 0) and company.greeting and company.greeting.strip():
-        greeting_instruction = f"""
-        ### CUSTOM GREETING RULE
-        Your verified opening greeting is: "{company.greeting}"
-        If you are greeting the user for the first time or if the user says hello, you MUST output ONLY this exact phrase.
-        Do NOT add "How can I help you?" or any other text.
-        Output EXACTLY: "{company.greeting}"
-        If the conversation history shows you already used it, do not repeat it.
-        """
+    
+    # ---------------------------------------------------------
+    # Stack Inspection to find room_id (Workaround for restricted signature)
+    # ---------------------------------------------------------
+    import inspect
+    from datetime import timedelta
+    
+    room_id = None
+    try:
+        # Search back in the stack for 'room_id'
+        curr_frame = inspect.currentframe()
+        caller_frame = curr_frame.f_back
+        
+        # Check a few frames up (usually direct caller)
+        for _ in range(5): 
+            if not caller_frame: break
+            if 'room_id' in caller_frame.f_locals:
+                room_id = caller_frame.f_locals['room_id']
+                break
+            caller_frame = caller_frame.f_back
+    except Exception as e:
+        logger.warning(f"Greeting Logic: Stack inspection error: {e}")
+
+    ignore_greeting = False
+    if room_id:
+        try:
+            from Socials.models import ChatRoom
+            room = ChatRoom.objects.get(id=room_id)
+            if room.last_outgoing_time:
+                time_since = django_timezone.now() - room.last_outgoing_time
+                if time_since.total_seconds() < 300: # 5 minutes
+                    ignore_greeting = True
+                    logger.info(f"Greeting Logic: Skipping custom greeting. Last reply was {int(time_since.total_seconds())}s ago.")
+        except Exception as e:
+            logger.warning(f"Greeting Logic: Room check failed: {e}")
+
+    # Only apply strict greeting execution on the very first message AND if not ignored
+    if company.greeting and company.greeting.strip():
+        if (not history or len(history) == 0) and not ignore_greeting:
+            greeting_instruction = f"""
+            ### CUSTOM GREETING RULE
+            Your verified opening greeting is: "{company.greeting}"
+            If you are greeting the user for the first time or if the user says hello, you MUST output ONLY this exact phrase.
+            Do NOT add "How can I help you?" or any other text.
+            Output EXACTLY: "{company.greeting}"
+            If the conversation history shows you already used it, do not repeat it.
+            """
+        elif ignore_greeting:
+             greeting_instruction = f"""
+            ### ACTIVE CONVERSATION RULE
+            You just spoke to this user recently.
+            Do NOT use any salutations like "Hello", "Hi", "Greetings", or "Good morning".
+            Do NOT repeat "How can I help you?".
+            Be direct and concise. If the user only said "Hi", just acknowledge briefly like "Yes?".
+            """
 
     response = chain.invoke({
         "company_name": company_name,
