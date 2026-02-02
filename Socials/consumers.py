@@ -420,10 +420,9 @@ def send_alert(target, title, subtitle="", type="info"):
 class TestChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         self.room_group_name = "ai_chat"
-        self.history = [] # Temporary in-memory history
         try:
             token = self.scope['query_string'].decode().split('token=')[-1]
-            self.user = await GlobalChatConsumer.get_user_from_token(token) 
+            self.user = await self.get_user_from_token(token) 
             
             if not self.user:
                 await self.close()
@@ -447,31 +446,40 @@ class TestChatConsumer(AsyncWebsocketConsumer):
     async def receive(self, text_data):
         try:
             data = json.loads(text_data)
-            user_message = data.get("message")
+            action = data.get("action", "send_message")
 
+            if action == 'get_messages':
+                limit = data.get('limit', 50)
+                messages = await self.get_db_messages(self.company, limit)
+                await self.send(text_data=json.dumps({
+                    "type": "room_messages",
+                    "messages": messages
+                }))
+                return
+
+            user_message = data.get("message")
             if not user_message:
                 await self.send(text_data=json.dumps({"error": "No message received."}))
                 return
 
-            # Get history for AI (excluding current message)
-            history = self.history[-20:] if self.history else []
+            # Save User Message
+            await self.save_test_chat(self.company, 'incoming', user_message)
+
+            # Get history from DB for AI
+            history = await self.get_test_chat_history(self.company, limit=20)
 
             # Run AI in background
             response = await self.get_ai_response(user_message, history)
-            
             ai_message = response.get('content', "Sorry, I couldn't generate a response.")
 
-            # Update in-memory history
-            self.history.append({"role": "user", "content": user_message})
-            self.history.append({"role": "assistant", "content": ai_message})
+            # Save AI Response
+            await self.save_test_chat(self.company, 'outgoing', ai_message)
             
-            # Keep history to last 20 messages
-            if len(self.history) > 20:
-                self.history = self.history[-20:]
-
             await self.send(text_data=json.dumps({
+                "type": "new_message",
                 "sender": "ai",
-                "message": ai_message
+                "message": ai_message,
+                "timestamp": timezone.now().isoformat()
             }))
 
         except Exception as e:
@@ -498,12 +506,51 @@ class TestChatConsumer(AsyncWebsocketConsumer):
         return response
     
     @database_sync_to_async
+    def get_user_from_token(self, token):
+        """Token থেকে user বের করে"""
+        try:
+            access_token = AccessToken(token)
+            user_id = access_token['user_id']
+            return User.objects.get(id=user_id)
+        except Exception as e:
+            print(f"❌ Token Error: {e}")
+            return None
+
+    @database_sync_to_async
     def get_company_from_user(self, user):
         if not user:
             return None
         if getattr(user, 'role', '') == 'employee':
             try:
-                return Employee.objects.get(email=user.email).company
+                company = Employee.objects.get(email=user.email).company
+                return company
             except Employee.DoesNotExist:
                 return None
         return Company.objects.filter(user=user).first()
+
+    @database_sync_to_async
+    def save_test_chat(self, company, msg_type, text):
+        return TestChat.objects.create(
+            company=company,
+            type=msg_type,
+            text=text
+        )
+
+    @database_sync_to_async
+    def get_test_chat_history(self, company, limit=20):
+        messages = TestChat.objects.filter(company=company).order_by('-timestamp')[:limit]
+        history = []
+        for msg in reversed(messages):
+            role = "user" if msg.type == 'incoming' else "assistant"
+            history.append({"role": role, "content": msg.text})
+        return history
+
+    @database_sync_to_async
+    def get_db_messages(self, company, limit=50):
+        messages = TestChat.objects.filter(company=company).order_by('-timestamp')[:limit]
+        return [{
+            "id": msg.id,
+            "type": msg.type,
+            "text": msg.text,
+            "timestamp": msg.timestamp.isoformat()
+        } for msg in reversed(messages)]

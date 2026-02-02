@@ -57,6 +57,10 @@ def get_available_slots(company_id: int, date_str: str = None, duration_minutes:
     Calculate available slots for a given date based on OpeningHours and existing Bookings.
     Returns a list of strings representing available start times.
     """
+    # Default duration to 60 if not provided
+    if duration_minutes is None:
+        duration_minutes = 60
+        
     print(f"DEBUG: get_available_slots call for Company {company_id}, Date: {date_str}, Duration: {duration_minutes}m")
     try:
         from django.utils import timezone as django_timezone
@@ -181,6 +185,10 @@ def get_available_slots(company_id: int, date_str: str = None, duration_minutes:
 
 def get_multi_day_availability(company_id: int, days: int = 7, duration_minutes: int = 60, service_obj=None) -> Dict[str, List[str]]:
     """Get availability for the next N days"""
+    # Default duration to 60 if not provided
+    if duration_minutes is None:
+        duration_minutes = 60
+
     from django.utils import timezone as django_timezone
     
     # Get company timezone
@@ -292,9 +300,11 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     try:
         company = Company.objects.get(id=company_id)
         company_name = company.name or "Unknown"
+        custom_greeting = company.greeting or ""
     except:
         company = None
         company_name = "Unknown"
+        custom_greeting = ""
 
     # --- Realtime Booking Data (SQLite) ---
     # REMOVED: Unsolicited injection of availability.
@@ -344,7 +354,8 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         Your tone must strictly follow: {tone}.
 
         ###CORE IDENTITY & BEHAVIOR
-        - Introduce yourself as a representative of "{company_name}" only in the first message of a new conversation (or if history is empty/null).
+        - **Custom Greeting Rule**: If "{custom_greeting}" is provided and not empty, YOU MUST use it verbatim as the opening of your first message (only if history is empty).
+        - If "{custom_greeting}" is empty or null, introduce yourself as a representative of "{company_name}" only in the first message.
         - If history exists, DO NOT repeat greetings or introductions.
         - Speak naturally, like a real support or sales executive.
         - Be polite, warm, confident, and professional.
@@ -614,6 +625,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
 
     response = chain.invoke({
         "company_name": company_name,
+        "custom_greeting": custom_greeting,
         "context": context_text, 
         "question": query,
         "history": history_text,

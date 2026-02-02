@@ -123,7 +123,7 @@ class VerifyOTP(APIView):
             # Generate JWT tokens
             refresh = RefreshToken.for_user(user)
             return Response({
-                "user": UserSerializer(user).data,
+                "user": UserSerializer(user, context={'request': request}).data,
                 "refresh": str(refresh),
                 "access": str(refresh.access_token),
             }, status=status.HTTP_200_OK)
@@ -316,6 +316,7 @@ class UpdatePermissionsView(APIView):
         # Extract target employee email and new roles
         employee = Employee.objects.filter(id=employee_id, company__user=target_user).first()
         new_roles = request.data.get("roles")
+        print(new_roles,employee)
 
         if not employee or not new_roles:
             return Response(
@@ -415,13 +416,13 @@ class SocialAuthCallbackView(APIView):
 
             # Generate JWT tokens
             refresh = RefreshToken.for_user(user)
-            serializer = UserSerializer(user)
+            serializer = UserSerializer(user, context={'request': request})
             access = refresh.access_token
             refresh = refresh
             plan = Subscriptions.objects.filter(company=get_company(user)).first()
             session = generate_session(request, user, access)   
             employee = Employee.objects.filter(email__iexact=user.email).first()
-            return Response({"user": serializer.data, "access": str(access), "refresh": str(refresh), "plan": True if plan else False, "session_id": session.id,"role": employee.roles if employee else None})
+            return Response({"user": serializer.data, "access": str(access), "refresh": str(refresh), "plan": True if plan else False, "session_id": session.id,"permissions": employee.roles if employee else None})
 
         except Exception as e:
             # print full error
@@ -433,4 +434,4 @@ class UserDataView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request):
-        return Response(UserSerializer(request.user).data)
+        return Response(UserSerializer(request.user, context={'request': request}).data)

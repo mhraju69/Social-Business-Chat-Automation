@@ -208,7 +208,7 @@ def unified_webhook(request, platform):
                     print(f"🤖 [{platform}] Bot reply activated for room {room.id}")
                     room.is_waiting_reply = True
                     room.save(update_fields=["is_waiting_reply"])
-                    wait_and_reply.delay(room.id, delay=5)
+                    wait_and_reply.delay(room.id, delay=0)
                     print(f"⏰ [{platform}] wait_and_reply task scheduled for room {room.id}")
                 else:
                     print(f"⏳ [{platform}] Already waiting for reply on room {room.id}, existing task will reschedule itself")
