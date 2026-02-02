@@ -352,6 +352,8 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         - Keep responses clear, helpful, and concise.
         - Maintain continuity with the conversation history at all times.
         
+        {greeting_instruction}
+
         ###RESPONSE LENGTH & QUALITY
         - Default replies should be 2–5 short sentences.
         - Only give longer answers if the user clearly asks for details or explanation.
@@ -521,6 +523,8 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
 
         The user must never feel they are talking to a machine.
         Every response should feel like it came from a real, attentive human representative of "{company_name}".
+        
+        {greeting_instruction}
 
         Context:
         {context}
@@ -550,6 +554,19 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     
     current_dt = django_timezone.now().astimezone(user_tz)
     
+    # Custom Greeting Logic
+    greeting_instruction = ""
+    # Only apply strict greeting execution on the very first message
+    if (not history or len(history) == 0) and company.greeting and company.greeting.strip():
+        greeting_instruction = f"""
+        ### CUSTOM GREETING RULE
+        Your verified opening greeting is: "{company.greeting}"
+        If you are greeting the user for the first time or if the user says hello, you MUST output ONLY this exact phrase.
+        Do NOT add "How can I help you?" or any other text.
+        Output EXACTLY: "{company.greeting}"
+        If the conversation history shows you already used it, do not repeat it.
+        """
+
     response = chain.invoke({
         "company_name": company_name,
         "context": context_text, 
@@ -557,7 +574,8 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         "history": history_text,
         "tone": tone,
         "current_date": current_dt.strftime("%Y-%m-%d"),
-        "current_day": current_dt.strftime("%A")
+        "current_day": current_dt.strftime("%A"),
+        "greeting_instruction": greeting_instruction
     })
     
     response_text = response.content
