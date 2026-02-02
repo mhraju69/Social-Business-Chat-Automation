@@ -52,7 +52,7 @@ class MockRequest:
         self.data = data or {}
         self.query_params = query_params or {}
 
-def get_available_slots(company_id: int, date_str: str = None, duration_minutes: int = None) -> List[str]:
+def get_available_slots(company_id: int, date_str: str = None, duration_minutes: int = 60, service_obj=None) -> List[str]:
     """
     Calculate available slots for a given date based on OpeningHours and existing Bookings.
     Returns a list of strings representing available start times.
@@ -135,6 +135,15 @@ def get_available_slots(company_id: int, date_str: str = None, duration_minutes:
         # Let's align with the duration for now to ensure fit.
         step_delta = slot_delta # strict packing
         
+        
+        # Service Limit Constraints
+        svc_start_limit = None
+        svc_end_limit = None
+        if service_obj and service_obj.start_time:
+             svc_start_limit = target_date.replace(hour=service_obj.start_time.hour, minute=service_obj.start_time.minute, second=0, microsecond=0)
+        if service_obj and service_obj.end_time:
+             svc_end_limit = target_date.replace(hour=service_obj.end_time.hour, minute=service_obj.end_time.minute, second=0, microsecond=0)
+
         for hours in hours_qs:
             current = target_date.replace(hour=hours.start.hour, minute=hours.start.minute, second=0, microsecond=0)
             day_end = target_date.replace(hour=hours.end.hour, minute=hours.end.minute, second=0, microsecond=0)
@@ -153,18 +162,28 @@ def get_available_slots(company_id: int, date_str: str = None, duration_minutes:
                 if overlap_count < concurrent_limit:
                     # Don't show past slots
                     if current > now_local:
-                        slots.append(current.strftime("%H:%M")) 
+                        # Check Service Limits
+                        in_limits = True
+                        if svc_start_limit and current < svc_start_limit:
+                            in_limits = False
+                        if svc_end_limit and slot_end > svc_end_limit:
+                            in_limits = False
+                        
+                        if in_limits:
+                            slots.append((current, current.strftime("%H:%M")))
                 
                 current += step_delta
         
-        return sorted(list(set(slots))) # Remove duplicates and sort
+        # Remove duplicates based on time, sort by time, then return strings
+        unique_slots = sorted(list(set(slots)), key=lambda x: x[0])
+        return [s[1] for s in unique_slots]
     except Exception as e:
         logger.error(f"Error calculating slots: {e}")
         import traceback
         traceback.print_exc()
         return []
 
-def get_multi_day_availability(company_id: int, days: int = 7, duration_minutes: int = None) -> Dict[str, List[str]]:
+def get_multi_day_availability(company_id: int, days: int = 7, duration_minutes: int = 60, service_obj=None) -> Dict[str, List[str]]:
     """Get availability for the next N days"""
     # Default duration to 60 if not provided
     if duration_minutes is None:
@@ -190,7 +209,7 @@ def get_multi_day_availability(company_id: int, days: int = 7, duration_minutes:
     for i in range(days):
         target_date = now_local + timedelta(days=i)
         date_str = target_date.strftime("%Y-%m-%d")
-        slots = get_available_slots(company_id, date_str, duration_minutes=duration_minutes)
+        slots = get_available_slots(company_id, date_str, duration_minutes=duration_minutes, service_obj=service_obj)
         if slots:
             availability[date_str] = slots
             
@@ -344,6 +363,8 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         - Keep responses clear, helpful, and concise.
         - Maintain continuity with the conversation history at all times.
         
+        {greeting_instruction}
+
         ###RESPONSE LENGTH & QUALITY
         - Default replies should be 2–5 short sentences.
         - Only give longer answers if the user clearly asks for details or explanation.
@@ -427,7 +448,9 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
             - If the user asks about "slots" without naming a service, DO NOT check availability yet. Instead ask: "Which service are you looking to book?"
         6. If service is unknown, ask the user to choose from the available services list.
         7. ONLY AFTER a service is explicitly identified, check availability.
-
+        
+        CRITICAL: When checking availability, output ONLY the JSON block below. NO conversational text, NO explanations. Just the JSON.
+        
         {{
             "action": "check_availability",
             "date": "YYYY-MM-DD" or null,
@@ -511,12 +534,17 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
 
         The user must never feel they are talking to a machine.
         Every response should feel like it came from a real, attentive human representative of "{company_name}".
+        
+        {greeting_instruction}
 
         Context:
         {context}
 
         Conversation History:
         {history}
+
+        User Question:
+        {question}
     """
     
     prompt = ChatPromptTemplate.from_template(template)
@@ -537,6 +565,64 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     
     current_dt = django_timezone.now().astimezone(user_tz)
     
+    # Custom Greeting Logic
+    greeting_instruction = ""
+    
+    # ---------------------------------------------------------
+    # Stack Inspection to find room_id (Workaround for restricted signature)
+    # ---------------------------------------------------------
+    import inspect
+    from datetime import timedelta
+    
+    room_id = None
+    try:
+        # Search back in the stack for 'room_id'
+        curr_frame = inspect.currentframe()
+        caller_frame = curr_frame.f_back
+        
+        # Check a few frames up (usually direct caller)
+        for _ in range(5): 
+            if not caller_frame: break
+            if 'room_id' in caller_frame.f_locals:
+                room_id = caller_frame.f_locals['room_id']
+                break
+            caller_frame = caller_frame.f_back
+    except Exception as e:
+        logger.warning(f"Greeting Logic: Stack inspection error: {e}")
+
+    ignore_greeting = False
+    if room_id:
+        try:
+            from Socials.models import ChatRoom
+            room = ChatRoom.objects.get(id=room_id)
+            if room.last_outgoing_time:
+                time_since = django_timezone.now() - room.last_outgoing_time
+                if time_since.total_seconds() < 300: # 5 minutes
+                    ignore_greeting = True
+                    logger.info(f"Greeting Logic: Skipping custom greeting. Last reply was {int(time_since.total_seconds())}s ago.")
+        except Exception as e:
+            logger.warning(f"Greeting Logic: Room check failed: {e}")
+
+    # Only apply strict greeting execution on the very first message AND if not ignored
+    if company.greeting and company.greeting.strip():
+        if (not history or len(history) == 0) and not ignore_greeting:
+            greeting_instruction = f"""
+            ### CUSTOM GREETING RULE
+            Your verified opening greeting is: "{company.greeting}"
+            If you are greeting the user for the first time or if the user says hello, you MUST output ONLY this exact phrase.
+            Do NOT add "How can I help you?" or any other text.
+            Output EXACTLY: "{company.greeting}"
+            If the conversation history shows you already used it, do not repeat it.
+            """
+        elif ignore_greeting:
+             greeting_instruction = f"""
+            ### ACTIVE CONVERSATION RULE
+            You just spoke to this user recently.
+            Do NOT use any salutations like "Hello", "Hi", "Greetings", or "Good morning".
+            Do NOT repeat "How can I help you?".
+            Be direct and concise. If the user only said "Hi", just acknowledge briefly like "Yes?".
+            """
+
     response = chain.invoke({
         "company_name": company_name,
         "custom_greeting": custom_greeting,
@@ -545,7 +631,8 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         "history": history_text,
         "tone": tone,
         "current_date": current_dt.strftime("%Y-%m-%d"),
-        "current_day": current_dt.strftime("%A")
+        "current_day": current_dt.strftime("%A"),
+        "greeting_instruction": greeting_instruction
     })
     
     response_text = response.content
@@ -632,7 +719,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                 def fetch_slots_for_service(srv_obj, d_str=None):
                     dur = srv_obj.duration if (srv_obj and srv_obj.duration) else 60
                     if d_str:
-                        return get_available_slots(company_id, d_str, duration_minutes=dur)
+                        return get_available_slots(company_id, d_str, duration_minutes=dur, service_obj=srv_obj)
                     return None
 
                 system_msg = ""
@@ -646,6 +733,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                     
                     if svc:
                          duration_minutes = svc.duration if svc.duration else 60
+                         print(f"DEBUG: Checking Service '{svc.name}' with duration {duration_minutes}m")
                          queried_services.append(svc)
                     else:
                          system_msg = f"System Info: Service '{service_name}' not found. Ask user to pick from available services."
@@ -669,7 +757,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                         for svc in queried_services:
                             svc_dur = svc.duration if svc.duration else 60
                             if date_str:
-                                slots = get_available_slots(company_id, date_str, duration_minutes=svc_dur)
+                                slots = get_available_slots(company_id, date_str, duration_minutes=svc_dur, service_obj=svc)
                                 if slots:
                                     slot_str = ", ".join(slots)
                                     full_report.append(f"Service '{svc.name}': {slot_str}")
@@ -678,7 +766,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                             else:
                                 # Multi-day check? 
                                 # Limit to next 3 days to avoid token explosion if checking ALL services
-                                availability = get_multi_day_availability(company_id, days=3, duration_minutes=svc_dur)
+                                availability = get_multi_day_availability(company_id, days=3, duration_minutes=svc_dur, service_obj=svc)
                                 if availability:
                                     avail_text = ""
                                     for d, s in availability.items():
