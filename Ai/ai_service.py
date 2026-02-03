@@ -121,6 +121,10 @@ def get_available_slots(company_id: int, date_str: str = None, duration_minutes:
 
         # Generate Slots based on opening hours and service duration
         slots = []
+        # Validate duration to prevent TypeError
+        if not duration_minutes or duration_minutes is None:
+            duration_minutes = 60
+            
         slot_delta = timedelta(minutes=duration_minutes)
         # Minimum step between potential slots (e.g., every 30 mins) - or just use duration?
         # Typically, if duration is 60, slots are 10:00, 11:00.
@@ -593,16 +597,31 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
             logger.warning(f"Greeting Logic: Room check failed: {e}")
 
     # Only apply strict greeting execution on the very first message AND if not ignored
+    valid_greetings = ["hi", "hello", "hey", "greetings", "good morning", "good afternoon", "good evening", "hola", "bonjour", "namaste", "salam"]
+    # Check if query is just a greeting (approximate check: short length and common words)
+    cleaned_query = query.strip().lower().replace(',', '').replace('!', '').replace('.', '')
+    is_generic_greeting = len(cleaned_query.split()) < 4 and any(g in cleaned_query for g in valid_greetings)
+
     if company.greeting and company.greeting.strip():
         if (not history or len(history) == 0) and not ignore_greeting:
-            greeting_instruction = f"""
-            ### CUSTOM GREETING RULE
-            Your verified opening greeting is: "{company.greeting}"
-            If you are greeting the user for the first time or if the user says hello, you MUST output ONLY this exact phrase.
-            Do NOT add "How can I help you?" or any other text.
-            Output EXACTLY: "{company.greeting}"
-            If the conversation history shows you already used it, do not repeat it.
-            """
+            if is_generic_greeting or len(query.strip()) < 3:
+                greeting_instruction = f"""
+                ### CUSTOM GREETING RULE
+                Your verified opening greeting is: "{company.greeting}"
+                Since the user only said a generic greeting, you MUST output ONLY this exact phrase.
+                Do NOT add "How can I help you?" or any other text.
+                Output EXACTLY: "{company.greeting}"
+                """
+            else:
+                 greeting_instruction = f"""
+                ### CUSTOM GREETING RULE (WITH ANSWER)
+                Your verified opening greeting is: "{company.greeting}"
+                The user has asked a specific question in their first message: "{query}"
+                1. Start your response with the exact greeting: "{company.greeting}"
+                2. IMMEDIATELY after the greeting, answer the user's question directly based on the context.
+                3. Do NOT ask "How can I help you?" or "Is there anything else?".
+                Example format: "{company.greeting} The price for X is..."
+                """
         elif ignore_greeting:
              greeting_instruction = f"""
             ### ACTIVE CONVERSATION RULE
@@ -773,7 +792,8 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                     "history": history_text + f"\nAssistant (Internal): Checking slots for {date_str or 'next few days'} for {service_name or 'all services'}.\nSystem: {system_msg}",
                     "tone": tone,
                     "current_date": current_dt.strftime("%Y-%m-%d"),
-                    "current_day": current_dt.strftime("%A")
+                    "current_day": current_dt.strftime("%A"),
+                    "greeting_instruction": greeting_instruction
                 })
                 
                 response_text = response_2.content
