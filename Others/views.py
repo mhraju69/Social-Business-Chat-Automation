@@ -1062,7 +1062,8 @@ class MonthlyBookingsView(APIView):
             "year": year,
             "timezone": str(company_tz),
             "total_bookings": bookings_qs.count(),
-            "bookings": bookings_list
+            "calendar": GoogleCalendar.objects.filter(company=company).exists(),
+            "bookings": bookings_list,
         }, status=status.HTTP_200_OK)
 
 class AITrainingFileBulkUploadView(APIView):

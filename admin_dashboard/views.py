@@ -525,7 +525,7 @@ class CompanyOverviewListView(generics.GenericAPIView):
         online_channels = ChatProfile.objects.filter(bot_active=True).count(),
         offline_channels = ChatProfile.objects.filter(bot_active=False).count(),
         warning_channels = 0,  # Placeholder for warning channel calculation
-        companies = Company.objects.all()
+        companies = Company.objects.exclude(name='').order_by('name')
         serializer = ChannelOverviewSerializer(companies, many=True, context={'request': request})
         data = {
             "total_channels": total_channels,
