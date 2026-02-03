@@ -19,6 +19,7 @@ from django.db.models.functions import Lower
 from Accounts.models import *
 from Accounts.utils import get_company_user
 from collections import Counter
+from django.http import HttpResponseRedirect
 # Create your views here.
 
 
@@ -100,9 +101,10 @@ def facebook_callback(request):
     print(f"Facebook callback: code={code}, error={error}, state={state_data}, from={_from}")
 
     if error:
-        return JsonResponse({"error": error})
+        return HttpResponseRedirect(f"{settings.FRONTEND_URL}/user/integrations")
+
     if not code:
-        return JsonResponse({"error": "Missing code parameter"})
+        return HttpResponseRedirect(f"{settings.FRONTEND_URL}/user/integrations")
 
     token_url = "https://graph.facebook.com/v20.0/oauth/access_token"
     # Dynamic redirect_uri to match the one sent in ConnectView
@@ -218,10 +220,10 @@ def instagram_callback(request):
     _from = state_data.split(",")[1]
 
     if error:
-        return Response({"error": error}, status=400)
+        return HttpResponseRedirect(f"{settings.FRONTEND_URL}/user/integrations")
 
     if not code:
-        return Response({"error": "Missing code parameter"}, status=400)
+        return HttpResponseRedirect(f"{settings.FRONTEND_URL}/user/integrations")
 
     token_url = "https://graph.facebook.com/v20.0/oauth/access_token"
     redirect_uri = request.build_absolute_uri(reverse("instagram_callback")).split('?')[0]
@@ -324,7 +326,7 @@ def instagram_callback(request):
     if _from == "app":
         return render(request,'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/policy")
+        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
 
 
 class ConnectWhatsappView(APIView):
@@ -365,9 +367,10 @@ def whatsapp_callback(request):
     print(f"WhatsApp callback: code={code}, error={error}, state={state_data}, from={_from}")
 
     if error:
-        return JsonResponse({"error": error})
+        return HttpResponseRedirect(f"{settings.FRONTEND_URL}/user/integrations")
+
     if not code:
-        return JsonResponse({"error": "Missing code parameter"})
+        return HttpResponseRedirect(f"{settings.FRONTEND_URL}/user/integrations")
 
     # Exchange code for access token
     token_url = "https://graph.facebook.com/v19.0/oauth/access_token"
@@ -485,7 +488,7 @@ def whatsapp_callback(request):
     if _from == "app":
         return render(request, 'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/policy")
+        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
     
 
 class ChatProfileView(RetrieveUpdateAPIView):
