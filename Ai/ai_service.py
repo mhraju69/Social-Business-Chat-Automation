@@ -789,7 +789,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                     "company_name": company_name,
                     "context": context_text + "\n" + system_msg, 
                     "question": query, 
-                    "history": history_text + f"\nAssistant (Internal): Checking slots for {date_str or 'next few days'} for {service_name or 'all services'}.\nSystem: {system_msg}",
+                    "history": history_text + f"\nAssistant (Internal): Checking slots for {date_str or 'next few days'} for {service_name or 'all services'}.\nSystem: {system_msg}\nIMPORTANT: You verified the slots. Now answer the user in natural language. DO NOT output JSON. Just list the slots politely.",
                     "tone": tone,
                     "current_date": current_dt.strftime("%Y-%m-%d"),
                     "current_day": current_dt.strftime("%A"),
@@ -808,8 +808,10 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                 # Check if it returned JSON again (loop), if so, force text
                 if "action" in response_text and "check_availability" in response_text:
                      deduct_tokens_now()
+                     # Clean up system_msg for user display
+                     clean_msg = system_msg.replace("System Info: Availability Report:", "").strip()
                      return {
-                         "content": f"Here is the availability info: {system_msg}",
+                         "content": f"Here are the available slots:\n{clean_msg}",
                          "token_usage": token_usage
                      }
                 
