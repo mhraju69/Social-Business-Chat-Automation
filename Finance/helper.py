@@ -53,8 +53,8 @@ def create_stripe_checkout_for_service(
     stripe_client.api_key = api_key
 
     # Success/cancel URLs
-    success_url = f"https://ape-in-eft.ngrok-free.app/api/payment-success/?payment_id={payment.id}"
-    cancel_url = f"https://ape-in-eft.ngrok-free.app/payment-cancel/"
+    success_url = f"https://api.verseai.nl/api/payment-success/?payment_id={payment.id}"
+    cancel_url = f"https://api.verseai.nl/payment-cancel/"
 
     # ---------------- METADATA ----------------
     metadata = {
@@ -188,8 +188,8 @@ def create_stripe_checkout_for_subscription(
             raise ValueError(f"Failed to setup Stripe Price: {str(e)}")
 
     # Success/cancel URLs
-    success_url = f"https://ape-in-eft.ngrok-free.app/api/payment-success/?payment_id={payment.id}"
-    cancel_url = f"https://ape-in-eft.ngrok-free.app/payment-cancel/"
+    success_url = f"https://api.verseai.nl/api/payment-success/?payment_id={payment.id}"
+    cancel_url = f"https://api.verseai.nl/payment-cancel/"
 
     # ---------------- CREATE STRIPE CHECKOUT ----------------
     checkout_args = {
@@ -313,8 +313,8 @@ def create_stripe_connect_account(company_id):
     # এই লিঙ্কটি ৩-৫ মিনিট পর এক্সপায়ার হয়ে যায়, তাই এটি প্রতিবার নতুন জেনারেট করতে হয়
     account_link = stripe.AccountLink.create(
         account=company.stripe_connect_id,
-        refresh_url="https://ape-in-eft.ngrok-free.app/api/finance/connect/refresh/", # ফেইল করলে বা এক্সপায়ার হলে এখানে যাবে
-        return_url="https://ape-in-eft.ngrok-free.app/api/finance/connect/success/", # সাকসেস হলে এখানে যাবে
+        refresh_url="https://api.verseai.nl/api/finance/connect/refresh/", # ফেইল করলে বা এক্সপায়ার হলে এখানে যাবে
+        return_url="https://api.verseai.nl/api/finance/connect/success/", # সাকসেস হলে এখানে যাবে
         type="account_onboarding",
     )
 

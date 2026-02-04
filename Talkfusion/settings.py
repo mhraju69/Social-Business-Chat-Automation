@@ -36,21 +36,14 @@ WHATSAPP_CONFIG_ID=os.getenv("WHATSAPP_CONFIG_ID")
 SECRET_KEY = 'django-insecure-7#$m=&$%3a_op)s4yr7qy2+424rs4#)2xi%9nj$in&0-*xqdmf'
 
 # SECURITY WARNING: don't run with debug turned on in production!
-ALLOWED_HOSTS = ['*']
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
 
 # This ensures build_absolute_uri() uses https when behind a proxy like ngrok
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 # settings.py
-CSRF_TRUSTED_ORIGINS = [
-    "https://ape-in-eft.ngrok-free.app",
-    'http://localhost:3000',
-    'https://wahejan.vercel.app'
-]
-CORS_ALLOWED_ORIGINS = [
-    "http://localhost:3000",
-    'https://wahejan.vercel.app'
-]
+CSRF_TRUSTED_ORIGINS = os.getenv("CSRF_TRUSTED_ORIGINS", "https://api.verseai.nl,https://verseai.nl,http://localhost:3000,https://wahejan.vercel.app").split(",")
+CORS_ALLOWED_ORIGINS = os.getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000,https://wahejan.vercel.app").split(",")
 CORS_ALLOWED_ALL_ORIGINS = True
 
 from corsheaders.defaults import default_headers
