@@ -51,7 +51,7 @@ from corsheaders.defaults import default_headers
 CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-client-info",
 ]
-# DEBUG = True
+DEBUG = True
 #DEBUG = False
 # Application definition
 

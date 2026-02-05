@@ -33,6 +33,8 @@ class FacebookConnectView(APIView):
     def get(self, request):
         fb_app_id = settings.FB_APP_ID
         redirect_uri = request.build_absolute_uri(reverse("facebook_callback"))
+        if "ngrok" in redirect_uri and redirect_uri.startswith("http://"):
+            redirect_uri = redirect_uri.replace("http://", "https://")
         
         # ✅ Added pages_messaging permission
         scope = "pages_show_list,pages_manage_metadata,pages_read_engagement,pages_messaging"
@@ -109,6 +111,8 @@ def facebook_callback(request):
     token_url = "https://graph.facebook.com/v20.0/oauth/access_token"
     # Dynamic redirect_uri to match the one sent in ConnectView
     redirect_uri = request.build_absolute_uri(reverse("facebook_callback")).split('?')[0]
+    if "ngrok" in redirect_uri and redirect_uri.startswith("http://"):
+        redirect_uri = redirect_uri.replace("http://", "https://")
     
     params = {
         "client_id": settings.FB_APP_ID,
@@ -196,7 +200,10 @@ class InstagramConnectView(APIView):
     def get(self, request):
         fb_app_id = settings.FB_APP_ID
         redirect_uri = request.build_absolute_uri(reverse("instagram_callback"))
-        scope = "instagram_basic,instagram_manage_messages,pages_show_list,pages_manage_metadata,pages_read_engagement"
+        if "ngrok" in redirect_uri and redirect_uri.startswith("http://"):
+            redirect_uri = redirect_uri.replace("http://", "https://")
+        print(f"😏😏😏 Connect Redirect URI: {redirect_uri}")
+        scope = "instagram_basic,instagram_manage_messages,pages_show_list,pages_manage_metadata,pages_read_engagement,business_management"
         target_user = get_company_user(request.user)
         state = target_user.id if target_user else request.user.id 
 
@@ -218,6 +225,8 @@ def instagram_callback(request):
     state_data = request.GET.get("state")
     state = state_data.split(",")[0]
     _from = state_data.split(",")[1]
+    print("😏😏😏Instagram callback state:",state)
+    print("😏😏😏Instagram callback from:",_from)
 
     if error:
         return HttpResponseRedirect(f"{settings.FRONTEND_URL}/user/integrations")
@@ -227,7 +236,10 @@ def instagram_callback(request):
 
     token_url = "https://graph.facebook.com/v20.0/oauth/access_token"
     redirect_uri = request.build_absolute_uri(reverse("instagram_callback")).split('?')[0]
-    
+    if "ngrok" in redirect_uri and redirect_uri.startswith("http://"):
+        redirect_uri = redirect_uri.replace("http://", "https://")
+    print(f"😏😏😏 Generated Redirect URI: {redirect_uri}")
+    print("checkpoint 1")
     params = {
         "client_id": settings.FB_APP_ID,
         "redirect_uri": redirect_uri,
@@ -236,11 +248,12 @@ def instagram_callback(request):
     }
     resp = requests.get(token_url, params=params)
     data = resp.json()
-
+    print("😏😏😏 Token Data:", data)
     if "access_token" not in data:
         return HttpResponse({"error": "Token exchange failed", "details": data}, status=400)
 
     short_lived_token = data["access_token"]
+    print("checkpoint 2: Short-lived token received")
     
     # Exchange for Long-lived User Token
     exchange_url = "https://graph.facebook.com/v20.0/oauth/access_token"
@@ -253,16 +266,19 @@ def instagram_callback(request):
     try:
         exchange_resp = requests.get(exchange_url, params=exchange_params)
         exchange_data = exchange_resp.json()
+        print("😏😏😏 Long-lived Token Data:", exchange_data)
         user_access_token = exchange_data.get("access_token", short_lived_token)
     except Exception as e:
         print(f"Error exchanging token: {e}")
         user_access_token = short_lived_token
 
+    print("checkpoint 3: Fetching pages")
     pages_resp = requests.get(
         "https://graph.facebook.com/v20.0/me/accounts",
         params={"access_token": user_access_token}
     )
     pages_data = pages_resp.json()
+    print("😏😏😏 Pages Data:", pages_data)
 
     if "data" not in pages_data:
         return HttpResponse({"error": "No pages found", "details": pages_data}, status=400)
@@ -271,34 +287,40 @@ def instagram_callback(request):
 
     profile_created = False
     
+    analysis_logs = []
+    print(f"checkpoint 4: Looping through {len(pages_data['data'])} pages")
     for page in pages_data["data"]:
         page_id = page["id"]
         page_name = page.get("name")
-        page_token = page["access_token"]  # This should be long-lived now since we used long-lived user token
+        page_token = page["access_token"] 
+        print(f"--- Checking Page: {page_name} ({page_id}) ---")
 
+        # We try to fetch multiple fields that might hold the IG account
         insta_resp = requests.get(
             f"https://graph.facebook.com/v20.0/{page_id}",
             params={
-                "fields": "instagram_business_account,name",
+                "fields": "instagram_business_account,connected_instagram_account,name",
                 "access_token": page_token
             }
         )
         insta_data = insta_resp.json()
-        print(f"DEBUG: Page {page_id} ({page_name}) data: {insta_data}")
+        print(f"😏😏😏 Page Meta Data: {insta_data}")
+        analysis_logs.append({
+            "page_name": page_name,
+            "page_id": page_id,
+            "api_response": insta_data
+        })
         
-        insta_account = insta_data.get("instagram_business_account")
+        # Check both fields
+        insta_account = insta_data.get("instagram_business_account") or insta_data.get("connected_instagram_account")
 
         if insta_account:
             ig_id = insta_account["id"]
-
-            # Strict check for Instagram: Single profile policy
             existing_ig_profile = ChatProfile.objects.filter(user=user, platform='instagram').first()
             
             if existing_ig_profile and existing_ig_profile.profile_id != ig_id:
-                # If an IG profile exists and it's NOT this one, skip.
                 continue
             
-            # Also prevent creating multiple in the same loop if user selects multiple (though less likely for IG logic here)
             if ChatProfile.objects.filter(user=user, platform='instagram').exclude(profile_id=ig_id).exists():
                 continue
 
@@ -306,28 +328,28 @@ def instagram_callback(request):
                 profile_id=ig_id,
                 defaults={
                     "user": user,
-                    # "page": ... removed as it does not exist in model
-                    "name": page_name, # Storing page name as profile name
+                    "name": page_name, 
                     "access_token": page_token,
                     "bot_active": True,
                     'platform': 'instagram',
                 },
             )
             profile_created = True
-        
-        # If no insta_account, just continue to next page
     
     if not profile_created:
-         # Check if we failed because one already exists (silent success?) or because none found
          if ChatProfile.objects.filter(user=user, platform='instagram').exists():
-             pass # Already had one, just didn't update (maybe IDs mismatch) - treat as success redirect
+             pass 
          else:
-             return HttpResponse({"error": "No Instagram Business account found linked to your pages."}, status=400)
+             return HttpResponse({
+                 "error": "No Instagram Business account found linked to your pages.",
+                 "debug_info": analysis_logs,
+                 "hint": "নিশ্চিত করুন আপনার Instagram অ্যাকাউন্টটি Business বা Creator মোডে আছে এবং এটি Facebook পেজের সাথে সঠিকভাবে লিঙ্ক করা আছে।"
+             }, status=400, content_type="application/json")
 
     if _from == "app":
         return render(request,'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
+        return redirect(f"{settings.FRONTEND_URL}/user/chat-profile")
 
 
 class ConnectWhatsappView(APIView):
@@ -344,6 +366,8 @@ class ConnectWhatsappView(APIView):
     
         state = target_user.id
         redirect_url = request.build_absolute_uri(reverse("whatsapp_callback"))
+        if "ngrok" in redirect_url and redirect_url.startswith("http://"):
+            redirect_url = redirect_url.replace("http://", "https://")
 
         redirect_url = f"https://www.facebook.com/v19.0/dialog/oauth?client_id={settings.FB_APP_ID}&redirect_uri={redirect_url}&state={state},{request.query_params.get('from','web')}&response_type=code&config_id={settings.WHATSAPP_CONFIG_ID}"
         
@@ -376,6 +400,8 @@ def whatsapp_callback(request):
     # Exchange code for access token
     token_url = "https://graph.facebook.com/v19.0/oauth/access_token"
     redirect_uri = request.build_absolute_uri(reverse("whatsapp_callback")).split('?')[0]
+    if "ngrok" in redirect_uri and redirect_uri.startswith("http://"):
+        redirect_uri = redirect_uri.replace("http://", "https://")
     
     params = {
         "client_id": settings.FB_APP_ID,
@@ -489,7 +515,7 @@ def whatsapp_callback(request):
     if _from == "app":
         return render(request, 'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
+        return redirect(f"{settings.FRONTEND_URL}/user/chat-profile")
     
 
 class ChatProfileView(RetrieveUpdateAPIView):

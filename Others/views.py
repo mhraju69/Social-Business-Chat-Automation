@@ -1240,11 +1240,12 @@ class ValidateTokenView(APIView):
         
         # Import UserSerializer here to avoid circular import
         from Accounts.serializers import UserSerializer
-        
+        employee = Employee.objects.filter(email__iexact=request.user.email).first()
         # Token is valid or refreshed successfully
         response_data = {
             "valid": True,
             "user": UserSerializer(result['user']).data,
+            "permissions": employee.roles if employee else None,
             "access": result['access_token'],
             "refresh": result['refresh_token'],
         }
