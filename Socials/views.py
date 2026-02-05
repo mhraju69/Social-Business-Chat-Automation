@@ -19,7 +19,7 @@ from django.db.models.functions import Lower
 from Accounts.models import *
 from Accounts.utils import get_company_user
 from collections import Counter
-from django.http import HttpResponseRedirect
+from django.http import HttpResponseRedirect,HttpResponse
 # Create your views here.
 
 
@@ -196,7 +196,7 @@ class InstagramConnectView(APIView):
     def get(self, request):
         fb_app_id = settings.FB_APP_ID
         redirect_uri = request.build_absolute_uri(reverse("instagram_callback"))
-        scope = "instagram_basic,instagram_manage_messages,pages_show_list,pages_manage_metadata"
+        scope = "instagram_basic,instagram_manage_messages,pages_show_list,pages_manage_metadata,pages_read_engagement"
         target_user = get_company_user(request.user)
         state = target_user.id if target_user else request.user.id 
 
@@ -238,7 +238,7 @@ def instagram_callback(request):
     data = resp.json()
 
     if "access_token" not in data:
-        return Response({"error": "Token exchange failed", "details": data}, status=400)
+        return HttpResponse({"error": "Token exchange failed", "details": data}, status=400)
 
     short_lived_token = data["access_token"]
     
@@ -265,7 +265,7 @@ def instagram_callback(request):
     pages_data = pages_resp.json()
 
     if "data" not in pages_data:
-        return Response({"error": "No pages found", "details": pages_data}, status=400)
+        return HttpResponse({"error": "No pages found", "details": pages_data}, status=400)
 
     user = User.objects.get(id=state)
 
@@ -279,11 +279,12 @@ def instagram_callback(request):
         insta_resp = requests.get(
             f"https://graph.facebook.com/v20.0/{page_id}",
             params={
-                "fields": "instagram_business_account",
+                "fields": "instagram_business_account,name",
                 "access_token": page_token
             }
         )
         insta_data = insta_resp.json()
+        print(f"DEBUG: Page {page_id} ({page_name}) data: {insta_data}")
         
         insta_account = insta_data.get("instagram_business_account")
 
@@ -321,7 +322,7 @@ def instagram_callback(request):
          if ChatProfile.objects.filter(user=user, platform='instagram').exists():
              pass # Already had one, just didn't update (maybe IDs mismatch) - treat as success redirect
          else:
-             return Response({"error": "No Instagram Business account found linked to your pages."}, status=400)
+             return HttpResponse({"error": "No Instagram Business account found linked to your pages."}, status=400)
 
     if _from == "app":
         return render(request,'redirect.html')
