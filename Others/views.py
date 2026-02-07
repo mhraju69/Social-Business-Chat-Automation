@@ -1311,6 +1311,21 @@ class PaymentSuccessView(APIView):
         if payment.invoice_url:
             return redirect(payment.invoice_url)
             
+        # Try to fetch invoice URL from Stripe if webhook is slow
+        if payment.transaction_id and payment.transaction_id.startswith('cs_'):
+            try:
+                import stripe
+                stripe.api_key = settings.STRIPE_SECRET_KEY
+                session = stripe.checkout.Session.retrieve(payment.transaction_id)
+                if session.invoice:
+                    invoice = stripe.Invoice.retrieve(session.invoice)
+                    if invoice.hosted_invoice_url:
+                        payment.invoice_url = invoice.hosted_invoice_url
+                        payment.save()
+                        return redirect(payment.invoice_url)
+            except Exception as e:
+                print(f"Error fetching invoice in success view: {e}")
+
         # Fallback if invoice is not ready yet
         return redirect(f"{settings.FRONTEND_URL}/dashboard")
 

@@ -54,8 +54,8 @@ def create_stripe_checkout_for_service(
     stripe_client.api_key = api_key
 
     # Success/cancel URLs
-    success_url = f"https://api.verseai.nl/api/payment-success/?payment_id={payment.id}"
-    cancel_url = f"https://api.verseai.nl/payment-cancel/"
+    success_url = f"{settings.BACKEND_URL}/api/payment-success/?payment_id={payment.id}"
+    cancel_url = f"{settings.BACKEND_URL}/payment-cancel/"
 
     # ---------------- METADATA ----------------
     metadata = {
@@ -105,6 +105,7 @@ def create_stripe_checkout_for_service(
 
     # Save Stripe session URL in Payment
     payment.url = session.url
+    payment.transaction_id = session.id
     payment.save()
 
     return payment
@@ -190,8 +191,8 @@ def create_stripe_checkout_for_subscription(
             raise ValueError(f"Failed to setup Stripe Price: {str(e)}")
 
     # Success/cancel URLs
-    success_url = f"https://api.verseai.nl/api/payment-success/?payment_id={payment.id}"
-    cancel_url = f"https://api.verseai.nl/payment-cancel/"
+    success_url = f"{settings.BACKEND_URL}/api/payment-success/?payment_id={payment.id}"
+    cancel_url = f"{settings.BACKEND_URL}/payment-cancel/"
 
     # ---------------- CREATE STRIPE CHECKOUT ----------------
     checkout_args = {
@@ -212,6 +213,7 @@ def create_stripe_checkout_for_subscription(
 
     # Save Stripe session URL in Payment
     payment.url = session.url
+    payment.transaction_id = session.id
     payment.save()
 
     return session
@@ -312,12 +314,10 @@ def create_stripe_connect_account(company_id):
         company.stripe_connect_id = account.id
         company.save()
 
-    # 2. Create the Account Link (Onboarding URL)
-    # এই লিঙ্কটি ৩-৫ মিনিট পর এক্সপায়ার হয়ে যায়, তাই এটি প্রতিবার নতুন জেনারেট করতে হয়
     account_link = stripe.AccountLink.create(
         account=company.stripe_connect_id,
-        refresh_url="https://api.verseai.nl/api/finance/connect/refresh/", # ফেইল করলে বা এক্সপায়ার হলে এখানে যাবে
-        return_url="https://api.verseai.nl/api/finance/connect/success/", # সাকসেস হলে এখানে যাবে
+        refresh_url=f"{settings.BACKEND_URL}/api/finance/connect/refresh/", 
+        return_url=f"{settings.BACKEND_URL}/api/finance/connect/success/",
         type="account_onboarding",
     )
 
