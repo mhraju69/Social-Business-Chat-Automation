@@ -1303,11 +1303,16 @@ class PaymentSuccessView(APIView):
     def get(self, request):
         payment_id = request.GET.get('payment_id')
         from Finance.models import Payment
-        payment = Payment.objects.get(id=payment_id)
-        if not payment:
+        try:
+            payment = Payment.objects.get(id=payment_id)
+        except Payment.DoesNotExist:
             return Response({"error": "Payment not found"}, status=status.HTTP_404_NOT_FOUND)
-        invoice = payment.invoice_url
-        return redirect(invoice)
+            
+        if payment.invoice_url:
+            return redirect(payment.invoice_url)
+            
+        # Fallback if invoice is not ready yet
+        return redirect(f"{settings.FRONTEND_URL}/dashboard")
 
 class PaymentCancelView(APIView):
     permission_classes = [permissions.AllowAny]

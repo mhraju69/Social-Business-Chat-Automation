@@ -146,12 +146,12 @@ class Payment(models.Model):
     type = models.CharField(max_length=20,choices=TYPE,default="services")
     reason = models.CharField(max_length=255, verbose_name="Payment Reason",blank=True,null=True)
     amount = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="Payment Amount")
-    transaction_id = models.CharField(max_length=100, verbose_name="Transaction ID",blank=True,null=True)
+    transaction_id = models.CharField(max_length=255, verbose_name="Transaction ID",blank=True,null=True)
     payment_date = models.DateTimeField(auto_now_add=True, verbose_name="Payment Date")
     status = models.CharField(max_length=20,choices=STATUS,default="pending")
     created_at = models.DateTimeField(auto_now_add=True)
-    url = models.URLField(null=True,blank=True)
-    invoice_url = models.URLField(null=True,blank=True)
+    url = models.URLField(max_length=500, null=True,blank=True)
+    invoice_url = models.URLField(max_length=500, null=True,blank=True)
     history = HistoricalRecords()
 
     def __str__(self):

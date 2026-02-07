@@ -8,6 +8,7 @@ def get_stripe_client():
     """Return platform Stripe client configuration."""
     return stripe, settings.STRIPE_SECRET_KEY, settings.STRIPE_WEBHOOK_SECRET
 
+
 def create_stripe_checkout_for_service(
     company_id,
     email,
@@ -68,7 +69,7 @@ def create_stripe_checkout_for_service(
 
     # ---------------- CREATE STRIPE CHECKOUT ----------------
     checkout_args = {
-        "payment_method_types": ["card", "paypal"],
+        "payment_method_types": ["card"],
         "line_items": [{"price_data": price_data, "quantity": 1}],
         "mode": "payment",
         "success_url": success_url,
@@ -107,6 +108,7 @@ def create_stripe_checkout_for_service(
     payment.save()
 
     return payment
+
 
 def create_stripe_checkout_for_subscription(
     company_id,
@@ -193,7 +195,7 @@ def create_stripe_checkout_for_subscription(
 
     # ---------------- CREATE STRIPE CHECKOUT ----------------
     checkout_args = {
-        "payment_method_types": ["card", "paypal"],
+        "payment_method_types": ["card"],
         "line_items": [{"price": plan.stripe_price_id, "quantity": 1}],
         "mode": "subscription", # Changed from 'payment' to 'subscription'
         "success_url": success_url, # Update with your real URLs
@@ -213,6 +215,7 @@ def create_stripe_checkout_for_subscription(
     payment.save()
 
     return session
+
 
 def update_existing_subscriptions_to_new_price(plan_id):
     """
@@ -256,6 +259,7 @@ def update_existing_subscriptions_to_new_price(plan_id):
 
     return True, f"Updated {success_count} subscriptions. Failed: {fail_count}."
 
+
 def cancel_stripe_subscription(subscription_id, immediate=False):
     """
     Cancel a Stripe subscription.
@@ -279,7 +283,6 @@ def cancel_stripe_subscription(subscription_id, immediate=False):
             return True, "Auto-renewal turned off. Access will continue until end of period."
     except Exception as e:
         return False, str(e)
-
 
 
 def create_stripe_connect_account(company_id):
@@ -319,6 +322,7 @@ def create_stripe_connect_account(company_id):
     )
 
     return account_link.url
+
 
 def process_auto_renewal(company_id):
     """

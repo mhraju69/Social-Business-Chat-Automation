@@ -17,6 +17,7 @@ from Socials.consumers import send_alert
 from decimal import Decimal
 from .helper import *
 import logging
+import traceback
 from Accounts.utils import get_company_user
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,7 @@ def create_checkout_session_for_subscription(request):
         # Call stripe function - returns Stripe Session object
         session = create_stripe_checkout_for_subscription(
             company.id,
-            plan_id,
+            plan_id
         )
 
         return Response({"redirect_url": session.url}, status=status.HTTP_303_SEE_OTHER)
@@ -233,6 +234,7 @@ def stripe_webhook(request):
 
         except Exception as e:
             logger.error(f"Error processing checkout.session.completed: {e}")
+            logger.error(traceback.format_exc())
             return HttpResponse(status=500)
 
     # ----------------------------------------------------------------------
@@ -245,40 +247,45 @@ def stripe_webhook(request):
         # We only care if it's a subscription invoice
         if subscription_id:
             try:
-                sub_obj = Subscriptions.objects.get(stripe_subscription_id=subscription_id)
-                
-                with transaction.atomic():
-                    # Extend the subscription end date in our DB
-                    sub_obj.active = True
-                    # In our model's save(), it calculates 'end' based on 'start'. 
-                    # So we update 'start' to now (or period start) and 'end' to None to trigger recalculation.
-                    sub_obj.start = timezone.now()
-                    sub_obj.end = None 
-                    sub_obj._history_user = sub_obj.company.user
-                    sub_obj.save()
+                try:
+                    sub_obj = Subscriptions.objects.get(stripe_subscription_id=subscription_id)
+                    
+                    with transaction.atomic():
+                        # Extend the subscription end date in our DB
+                        sub_obj.active = True
+                        # In our model's save(), it calculates 'end' based on 'start'. 
+                        # So we update 'start' to now (or period start) and 'end' to None to trigger recalculation.
+                        sub_obj.start = timezone.now()
+                        sub_obj.end = None 
+                        sub_obj._history_user = sub_obj.company.user
+                        sub_obj.save()
 
-                    # Record the renewal payment
-                    payment = Payment(
-                        company=sub_obj.company,
-                        type="subscriptions",
-                        amount=Decimal(invoice.get('amount_paid', 0)) / 100,
-                        status="success",
-                        transaction_id=invoice.get('payment_intent'),
-                        reason=f"Subscription Renewal: {sub_obj.plan.name}",
-                        payment_date=timezone.now(),
-                        invoice_url=invoice.get('hosted_invoice_url')
-                    )
-                    payment._history_user = sub_obj.company.user
-                    payment.save()
-                    send_alert(
-                        [sub_obj.company],
-                        "Subscription Renewed",
-                        "Your subscription has been renewed.",
-                        "info"
+                        # Record the renewal payment
+                        payment = Payment(
+                            company=sub_obj.company,
+                            type="subscriptions",
+                            amount=Decimal(invoice.get('amount_paid', 0)) / 100,
+                            status="success",
+                            transaction_id=invoice.get('payment_intent'),
+                            reason=f"Subscription Renewal: {sub_obj.plan.name}",
+                            payment_date=timezone.now(),
+                            invoice_url=invoice.get('hosted_invoice_url')
                         )
-                    logger.info(f"🔄 Subscription {subscription_id} renewed via invoice.paid")
-            except Subscriptions.DoesNotExist:
-                logger.warning(f"Invoice paid for unknown subscription: {subscription_id}")
+                        payment._history_user = sub_obj.company.user
+                        payment.save()
+                        send_alert(
+                            [sub_obj.company],
+                            "Subscription Renewed",
+                            "Your subscription has been renewed.",
+                            "info"
+                            )
+                        logger.info(f"🔄 Subscription {subscription_id} renewed via invoice.paid")
+                except Subscriptions.DoesNotExist:
+                    logger.warning(f"Invoice paid for unknown subscription: {subscription_id}")
+            except Exception as e:
+                logger.error(f"Error processing invoice.paid: {e}")
+                logger.error(traceback.format_exc())
+                return HttpResponse(status=500)
 
     # ----------------------------------------------------------------------
     # 3. SUBSCRIPTION CANCELLED OR EXPIRED
