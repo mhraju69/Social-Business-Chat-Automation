@@ -41,7 +41,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Constants
-QDRANT_URL = "https://deed639e-bc0e-43fe-8dc2-2edaed834f41.europe-west3-0.gcp.cloud.qdrant.io:6333"
+#QDRANT_URL = "https://deed639e-bc0e-43fe-8dc2-2edaed834f41.europe-west3-0.gcp.cloud.qdrant.io:6333"
+QDRANT_URL = os.getenv("QDRANT_URL")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY") 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 COLLECTION_NAME = "company_knowledge"
@@ -52,7 +53,7 @@ class MockRequest:
         self.data = data or {}
         self.query_params = query_params or {}
 
-def get_available_slots(company_id: int, date_str: str = None, duration_minutes: int = 60, service_obj=60) -> List[str]:
+def get_available_slots(company_id: int, date_str: str = None, duration_minutes: int = 60, service_obj=None) -> List[str]:
     """
     Calculate available slots for a given date based on OpeningHours and existing Bookings.
     Returns a list of strings representing available start times.
@@ -114,7 +115,7 @@ def get_available_slots(company_id: int, date_str: str = None, duration_minutes:
                  b_end = b.end_time.astimezone(user_tz)
             else:
                  b_end = b_start + timedelta(hours=1)
-            booked_ranges.append((b_start, b_end))
+            booked_ranges.append((b_start, b_end, b.title))
             
         # Get Booking Limit
         concurrent_limit = getattr(company, 'concurrent_booking_limit', 1)
@@ -133,7 +134,8 @@ def get_available_slots(company_id: int, date_str: str = None, duration_minutes:
         # User request implies specific slots for service. Let's start with start-to-end packed.
         # But standard booking usually offers fixed intervals (e.g. 30min or 1hr). 
         # Let's align with the duration for now to ensure fit.
-        step_delta = slot_delta # strict packing
+        # User requires slots based strictly on duration (e.g. 9:00, 9:19, 9:38 for 19m service)
+        step_delta = slot_delta
         
         
         # Service Limit Constraints
@@ -153,11 +155,19 @@ def get_available_slots(company_id: int, date_str: str = None, duration_minutes:
                 
                 # Count overlaps
                 overlap_count = 0
-                for b_start, b_end in booked_ranges:
+                for b_start, b_end, b_title in booked_ranges:
+                     # Check Service Match: If we are checking for a specific service,
+                     # ONLY count overlaps if the existing booking is for the SAME service.
+                     # This allows concurrent bookings of DIFFERENT services.
+                     if service_obj and service_obj.name:
+                         # Case-insensitive check
+                         if service_obj.name.lower().strip() not in b_title.lower().strip():
+                             continue # Different service, ignore
+
                      # Check if time ranges overlap
                      # (StartA < EndB) and (EndA > StartB)
-                    if current < b_end and slot_end > b_start:
-                        overlap_count += 1
+                     if current < b_end and slot_end > b_start:
+                         overlap_count += 1
                 
                 if overlap_count < concurrent_limit:
                     # Don't show past slots
@@ -233,6 +243,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
     embeddings = OpenAIEmbeddings(model="text-embedding-3-small", openai_api_key=OPENAI_API_KEY)
     llm = ChatOpenAI(model="gpt-4o", openai_api_key=OPENAI_API_KEY, temperature=0.7)
+    # llm = ChatOpenAI(model="gpt-5-mini-2025-08-07", openai_api_key=OPENAI_API_KEY, temperature=0.7)
     
     # 2. Embed Query & Search
     try:
@@ -275,8 +286,8 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         collection_name=COLLECTION_NAME,
         query=query_vector,
         query_filter=search_filter,
-        limit=5, # Reduced from 10 for token optimization
-        score_threshold=0.2 
+        limit=10, # Increased context window for better answers
+        score_threshold=0.45 # Filter out noise/weak matches (previously 0.2) 
     ).points
 
     # Filter out Booking vectors (Ghost data) ONLY
@@ -327,8 +338,8 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     # Format History
     history_text = ""
     if history:
-        # Optimization: Limit to last 5 interaction turns to manage token usage
-        recent_history = history[-10:] 
+        # Optimization: Limit to last 20 messages (approx 10 interactions) to keep context
+        recent_history = history[-20:] 
         for msg in recent_history:
             role = msg.get("role", "user").capitalize()
             content = msg.get("content", "")
@@ -436,11 +447,15 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         1. Identify the date they are interested in.
         2. If they mention "this week", "next days", or "weekly availability" → set date to null.
         3. If the date is vague (e.g. "tomorrow", "this Friday", "evening"), ask a single clarifying question before checking availability. Never assume a time.
-        4. If no specific date/week is mentioned, assume TODAY ({current_date}).
-        5. CRITICAL: You MUST ask the user to specify a SERVICE NAME before checking availability, unless they already mentioned it.
-            - If the user asks about "slots" without naming a service, DO NOT check availability yet. Instead ask: "Which service are you looking to book?"
-        6. If service is unknown, ask the user to choose from the available services list.
-        7. ONLY AFTER a service is explicitly identified, check availability.
+        4. If the user provides a day/month (e.g. "20 February"), calculate the full date YYYY-MM-DD using the current year from {current_date}. 
+           - CRITICAL: If the calculated date is in the past relative to {current_date}, assume it is for NEXT YEAR.
+        5. If no specific date/week is mentioned, assume TODAY ({current_date}).
+        6. CRITICAL: You MUST identify the SERVICE NAME.
+            - FIRST, check the Conversation History. If we were just discussing a specific service (e.g. asking about price/duration), use that service.
+            - If valid service is found in history, DO NOT ask again.
+            - ONLY if the service is completely unknown, ask: "Which service are you looking to book?"
+        7. If service is unknown, ask the user to choose from the available services list.
+        8. ONLY AFTER a service is explicitly identied (from history or current message), check availability.
         
         CRITICAL: When checking availability, output ONLY the JSON block below. NO conversational text, NO explanations. Just the JSON.
         
@@ -450,11 +465,13 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
             "service_name": "Exact Service Name"
         }}
         - If the user wants to book:
-        Collect the following details (ask only for what is missing):
-        1. Service name / title
-        2. Preferred date & time (Calculate exact YYYY-MM-DD based on current date {current_date} ({current_day})).
-        IMPORTANT: If current month is December and user says "next January", the year must be next year.
-        3. Email address
+        Collect the following details (FIRST check Conversation History for these values):
+        1. Service name / title (If previously discussed, do not ask again)
+        2. Preferred date & time (If discussed, do not ask again. Calculate exact YYYY-MM-DD from context).
+           IMPORTANT: If current month is December and user says "next January", the year must be next year.
+        3. Email address (If user provided it previously, do not ask again)
+
+        Rule: ASK ONLY FOR WHAT IS MISSING. Do not confirm what you already know.
 
         - Once ALL THREE details are collected, output JSON ONLY:
         {{
@@ -590,7 +607,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
             room = ChatRoom.objects.get(id=room_id)
             if room.last_outgoing_time:
                 time_since = django_timezone.now() - room.last_outgoing_time
-                if time_since.total_seconds() < 300: # 5 minutes
+                if time_since.total_seconds() < 600: # 10 minutes
                     ignore_greeting = True
                     logger.info(f"Greeting Logic: Skipping custom greeting. Last reply was {int(time_since.total_seconds())}s ago.")
         except Exception as e:
@@ -603,7 +620,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     is_generic_greeting = len(cleaned_query.split()) < 4 and any(g in cleaned_query for g in valid_greetings)
 
     if company.greeting and company.greeting.strip():
-        if (not history or len(history) == 0) and not ignore_greeting:
+        if not ignore_greeting:
             if is_generic_greeting or len(query.strip()) < 3:
                 greeting_instruction = f"""
                 ### CUSTOM GREETING RULE
@@ -656,7 +673,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         token_usage["input_tokens"] += usage.get('prompt_tokens', 0)
         token_usage["output_tokens"] += usage.get('completion_tokens', 0)
         token_usage["total_tokens"] += usage.get('total_tokens', 0)
-    print("token_usage:😁😁😁😁😁", token_usage)
+    print("token_usage:", token_usage)
 
     # Define helper to deduct tokens
     def deduct_tokens_now():
@@ -789,7 +806,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                     "company_name": company_name,
                     "context": context_text + "\n" + system_msg, 
                     "question": query, 
-                    "history": history_text + f"\nAssistant (Internal): Checking slots for {date_str or 'next few days'} for {service_name or 'all services'}.\nSystem: {system_msg}\nIMPORTANT: You verified the slots. Now answer the user in natural language. DO NOT output JSON. Just list the slots politely.",
+                    "history": history_text + f"\nAssistant (Internal): Checking slots for {date_str or 'next few days'} for {service_name or 'all services'}.\nSystem: {system_msg}\nIMPORTANT: You verified the slots. Now answer the user in natural language. DO NOT output JSON. You MUST list EACH AND EVERY available slot time explicitly (e.g. '12:00, 12:30, 13:00...'). DO NOT summarize range (e.g. 'from 12:00 to 18:00'). show ALL options.",
                     "tone": tone,
                     "current_date": current_dt.strftime("%Y-%m-%d"),
                     "current_day": current_dt.strftime("%A"),
@@ -918,16 +935,29 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                 db_services = Service.objects.filter(company_id=company_id)
                 
                 for item_name in items:
-                    # Simple case-insensitive matching
-                    service = next((s for s in db_services if s.name.lower() == item_name.lower()), None)
+                    # Robust matching logic
+                    item_norm = item_name.strip().lower()
+                    
+                    # 1. Exact Match
+                    service = next((s for s in db_services if s.name.strip().lower() == item_norm), None)
+                    
+                    if not service:
+                        # 2. Substring Match (Item name inside Service name, e.g. "Premium" -> "Premium Plan")
+                        candidates = [s for s in db_services if item_norm in s.name.strip().lower()]
+                        if len(candidates) == 1:
+                            service = candidates[0]
+                        elif not candidates:
+                            # 3. Reverse Substring (Service name inside Item name, e.g. "Premium Plan please" -> "Premium Plan")
+                            candidates = [s for s in db_services if s.name.strip().lower() in item_norm]
+                            if candidates:
+                                # Pick the longest service name matched (most specific)
+                                service = max(candidates, key=lambda s: len(s.name))
+
                     if service:
                         total_amount += float(service.price)
                         valid_items.append(service.name)
                     else:
-                        # Fallback: if exact match fails, maybe the AI passed a close name? 
-                        # For now, we'll just log it or add 0, or trust the user? 
-                        # Security-wise, skipping unknown items is safer.
-                        pass
+                        print(f"Warning: Could not match item '{item_name}' to any service.")
                 
                 if total_amount <= 0:
                      deduct_tokens_now()
