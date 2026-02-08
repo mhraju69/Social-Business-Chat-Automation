@@ -360,3 +360,16 @@ class CancelSubscriptionView(APIView):
             return Response({"message": message}, status=200)
         else:
             return Response({"error": message}, status=400)
+
+
+class GetStripeConnectAccount(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        target_user = get_company_user(request.user)
+        company = Company.objects.filter(user=target_user).first()
+        
+        if not company:
+            return Response({"error": "Company not found"}, status=404)
+
+        return Response({"connect_id": company.stripe_connect_id}, status=200)

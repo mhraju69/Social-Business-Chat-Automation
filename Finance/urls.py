@@ -13,5 +13,6 @@ urlpatterns = [
     path('connect/success/', stripe_connect_success, name='stripe_connect_success'),
     path('connect/refresh/', stripe_connect_refresh, name='stripe_connect_refresh'),
     path('cancel-subscription/', CancelSubscriptionView.as_view(), name='cancel_subscription'),
+    path('connect/account/', GetStripeConnectAccount.as_view(), name='stripe_connect_account'),
 ]
 
