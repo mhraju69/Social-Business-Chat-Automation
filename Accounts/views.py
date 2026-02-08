@@ -122,9 +122,10 @@ class VerifyOTP(APIView):
 
             # Generate JWT tokens
             refresh = RefreshToken.for_user(user)
+            employee = None
             if user.role == "owner":
                 employee = Employee.objects.filter(email__iexact=user.email).first()
-                
+
             return Response({
                 "user": UserSerializer(user, context={'request': request}).data,
                 "permissions": employee.roles if employee else None,
