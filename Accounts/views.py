@@ -123,7 +123,7 @@ class VerifyOTP(APIView):
             # Generate JWT tokens
             refresh = RefreshToken.for_user(user)
             employee = None
-            if user.role == "owner":
+            if user.role == "employee":
                 employee = Employee.objects.filter(email__iexact=user.email).first()
 
             return Response({
