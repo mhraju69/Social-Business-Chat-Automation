@@ -256,8 +256,8 @@ def generate_session(request, user, access):
 
 
     ip_address = get_client_ip(request)
-    # Override the old session with new one if user login from same ip
-    UserSession.objects.filter(user=user, ip_address=ip_address).delete()
+    # Override the old session with new one if user login from same ip, device and browser
+    UserSession.objects.filter(user=user, ip_address=ip_address,device=device,browser=platform).delete()
 
     session = UserSession.objects.create(
         user=user,
