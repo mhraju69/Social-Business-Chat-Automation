@@ -897,12 +897,12 @@ class ActiveSessionsView(APIView):
         except:
             jti = None
             
-        current_session = UserSession.objects.filter(token=jti).first()
+        current_session = UserSession.objects.filter(token=jti, is_active=True).first()
         
         # Get last 5 sessions (excluding current if possible to avoid dupes in logic, then attach)
         # But user wants current at top.
         
-        other_sessions_qs = UserSession.objects.filter(user=request.user).order_by('-last_active')
+        other_sessions_qs = UserSession.objects.filter(user=request.user, is_active=True).order_by('-last_active')
         
         if current_session:
             other_sessions_qs = other_sessions_qs.exclude(id=current_session.id)
@@ -923,7 +923,8 @@ class ActiveSessionsView(APIView):
             "ip": s.ip_address,
             "last_active": s.last_active,
             "session_id": s.id,
-            "is_active" : s.is_active
+            "is_active" : s.is_active,
+            "created_at": s.created_at
         } for s in list(reversed(sessions))[:5]]
 
         return Response(data[::-1])

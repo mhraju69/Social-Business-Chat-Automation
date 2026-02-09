@@ -255,13 +255,17 @@ def generate_session(request, user, access):
                 pass
 
 
+    ip_address = get_client_ip(request)
+    # Override the old session with new one if user login from same ip
+    UserSession.objects.filter(user=user, ip_address=ip_address).delete()
+
     session = UserSession.objects.create(
         user=user,
         device=device,
         browser=platform,
-        ip_address=get_client_ip(request),
+        ip_address=ip_address,
         token=str(access['jti']),
-        location=get_location(get_client_ip(request))
+        location=get_location(ip_address)
     )
 
     # Trigger AI Analysis Pre-warming
