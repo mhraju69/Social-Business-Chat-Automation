@@ -325,7 +325,8 @@ class CheckPlan(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        company = getattr(request.user, 'company', None)
+        target_user = get_company_user(request.user)
+        company = getattr(target_user, 'company', None)
 
         paln = Subscriptions.objects.filter(company=company,active=True).select_related('plan','company')
         

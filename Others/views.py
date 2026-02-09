@@ -23,6 +23,7 @@ from Ai.tasks import sync_company_knowledge_task
 from Ai.data_analysis import analyze_company_data
 from Accounts.utils import get_company_user
 
+
 class ClientBookingView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     def post(self, request):
@@ -767,7 +768,8 @@ class ConnectGoogleCalendarView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        company = Company.objects.filter(user=request.user).first()
+        target_user = get_company_user(request.user)
+        company = Company.objects.filter(user=target_user).first()
         method = request.data.get("from", "web")
         if not company:
             return Response(
@@ -837,8 +839,8 @@ class GoogleOAuthCallbackView(APIView):
                 {"error": "Invalid user"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        company = Company.objects.filter(user=user).first()
+        target_user = get_company_user(user)
+        company = Company.objects.filter(user=target_user).first()
         if not company:
             return Response(
                 {"error": "Company not found"},
@@ -957,7 +959,8 @@ class MonthlyBookingsView(APIView):
 
     def get(self, request):
         try:
-            company = Company.objects.get(user=request.user)
+            target_user = get_company_user(request.user)
+            company = Company.objects.get(user=target_user)
         except Company.DoesNotExist:
             return Response(
                 {"error": "Company profile not found"}, 
@@ -1071,7 +1074,8 @@ class AITrainingFileBulkUploadView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
     def post(self, request):
-        company = Company.objects.filter(user=request.user).first()
+        target_user = get_company_user(request.user)
+        company = Company.objects.filter(user=target_user).first()
         if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
         
@@ -1092,7 +1096,8 @@ class AITrainingFileBulkUploadView(APIView):
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     
     def get(self, request):
-        company = Company.objects.filter(user=request.user).first()
+        target_user = get_company_user(request.user)
+        company = Company.objects.filter(user=target_user).first()
         if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
             
@@ -1101,7 +1106,8 @@ class AITrainingFileBulkUploadView(APIView):
         return Response(serializer.data)
 
     def delete(self, request):
-        company = Company.objects.filter(user=request.user).first()
+        target_user = get_company_user(request.user)
+        company = Company.objects.filter(user=target_user).first()
         file = request.data.get('file_id')
         if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
@@ -1116,7 +1122,8 @@ class BookingDaysView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     
     def get(self, request):
-        company = Company.objects.filter(user=request.user).first()
+        target_user = get_company_user(request.user)
+        company = Company.objects.filter(user=target_user).first()
         if not company:
             return Response({"error": "Company not found"}, status=status.HTTP_404_NOT_FOUND)
         
