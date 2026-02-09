@@ -24,7 +24,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action == 'create':
             return [permissions.AllowAny()]
-        return [permissions.IsAuthenticated()]
+        return [permissions.IsAuthenticated(), IsEmployeeAndCanManageUsers()]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -139,7 +139,7 @@ class VerifyOTP(APIView):
 
 class CompanyDetailUpdateView(generics.RetrieveUpdateAPIView):
     serializer_class = CompanySerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsEmployeeAndCanAccessSystemSettings]
 
     def get_object(self):
         """
@@ -162,7 +162,7 @@ class CompanyDetailUpdateView(generics.RetrieveUpdateAPIView):
 
 class ServiceListCreateView(generics.ListCreateAPIView):
     serializer_class = ServiceSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsEmployeeAndCanAccessSystemSettings]
 
     def get_queryset(self):
         target_user = get_company_user(self.request.user)
@@ -175,7 +175,7 @@ class ServiceListCreateView(generics.ListCreateAPIView):
 
 class ServiceRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ServiceSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsEmployeeAndCanAccessSystemSettings]
 
     def get_queryset(self):
         # Only allow access to services belonging to the user’s company or owner's company
@@ -269,7 +269,7 @@ class AddEmployeeView(APIView):
     
 class GetPermissionsView(APIView):
     """Get permissions for the authenticated user"""
-    permission_classes = [permissions.IsAuthenticated,IsOwner]
+    permission_classes = [permissions.IsAuthenticated, IsOwner, IsEmployeeAndCanManageUsers]
 
     def get(self, request,employee_id):
         target_user = get_company_user(request.user)
@@ -314,7 +314,7 @@ class GetPermissionsView(APIView):
 
 class UpdatePermissionsView(APIView):
     """Update roles (permissions) for an employee - Admin only"""
-    permission_classes = [permissions.IsAuthenticated,IsOwner]
+    permission_classes = [permissions.IsAuthenticated, IsOwner, IsEmployeeAndCanManageUsers]
 
     def post(self, request,employee_id):
         target_user = get_company_user(request.user)

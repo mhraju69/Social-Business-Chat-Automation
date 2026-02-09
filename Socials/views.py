@@ -20,6 +20,7 @@ from Accounts.models import *
 from Accounts.utils import get_company_user
 from collections import Counter
 from django.http import HttpResponseRedirect,HttpResponse
+from Accounts.permissions import *
 # Create your views here.
 
 
@@ -28,7 +29,7 @@ def Connect(request):
 
 
 class FacebookConnectView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanManageAPI]
 
     def get(self, request):
         fb_app_id = settings.FB_APP_ID
@@ -195,7 +196,7 @@ def facebook_callback(request):
 
 class InstagramConnectView(APIView):
     # permission_classes = [AllowAny]
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanManageAPI]
 
     def get(self, request):
         fb_app_id = settings.FB_APP_ID
@@ -353,7 +354,7 @@ def instagram_callback(request):
 
 
 class ConnectWhatsappView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanManageAPI]
     def get(self, request):
         target_user = get_company_user(request.user)
         if not target_user:
@@ -519,7 +520,7 @@ def whatsapp_callback(request):
     
 
 class ChatProfileView(RetrieveUpdateAPIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanAccessCustomerSupport]
     serializer_class = ChatProfileSerializers
 
     def get_object(self):
@@ -536,7 +537,7 @@ class ChatProfileView(RetrieveUpdateAPIView):
 
 
 class ChatProfileListView(ListAPIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanAccessCustomerSupport]
     serializer_class = ChatProfileSerializers
 
     def get_queryset(self):
@@ -553,6 +554,7 @@ class ChatProfileListView(ListAPIView):
 
 
 class CommonAskedLeaderboard(APIView):
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanAccessCustomerSupport]
     def get(self, request):
         target_user = get_company_user(request.user)
         company = Company.objects.filter(user=target_user).first()
@@ -597,7 +599,7 @@ class CommonAskedLeaderboard(APIView):
 
 
 class GetOldMessage(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanAccessCustomerSupport]
     def get(self, request,room_id,platform):
         target_user = get_company_user(request.user)
         if not ChatRoom.objects.filter(id=room_id,profile__user=target_user,profile__platform=platform).exists():
@@ -614,7 +616,7 @@ class GetOldMessage(APIView):
 
       
 class GetTestChatOldMessage(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanAccessCustomerSupport]
     def get(self, request):
         target_user = get_company_user(request.user)
         if not target_user:
@@ -632,7 +634,8 @@ class GetTestChatOldMessage(APIView):
         return Response(serializer.data)
 
 
-class SubscribeFacebookPageToWebhook(views.APIView):
+class SubscribeFacebookPageToWebhook(APIView):
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanManageAPI]
     def post(self,request,*args,**kwargs):
         profile = ChatProfile.objects.filter(id=request.query_params.get("profile_id")).first()
         if not profile:

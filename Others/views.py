@@ -189,7 +189,7 @@ class DashboardView(APIView):
         })
     
 class UserActivityLogView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanAccessAnalyticsReports]
     
     def get_activity_type(self, record):
         type_map = {
@@ -353,7 +353,7 @@ class FinanceDataView(APIView):
         return Response(data)
 
 class ConnectGoogleCalendarView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanAccessSystemSettings]
 
     def post(self, request):
         target_user = get_company_user(request.user)
@@ -373,7 +373,7 @@ class ConnectGoogleCalendarView(APIView):
         return Response({"auth_url": auth_url})
 
 class OpeningHoursCreateView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsEmployeeAndCanAccessSystemSettings]
     def post(self, request):
         target_user = get_company_user(request.user)
         if not target_user:
@@ -413,7 +413,7 @@ class OpeningHoursCreateView(APIView):
 class OpeningHoursUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
     queryset = OpeningHours.objects.all()
     serializer_class = OpeningHoursSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsEmployeeAndCanAccessSystemSettings]
     lookup_field = 'id'
 
     def get_object(self):
@@ -434,7 +434,7 @@ class OpeningHoursUpdateDeleteView(generics.RetrieveUpdateDestroyAPIView):
         return obj
     
 class UserAlertsView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanAccessCustomerSupport]
 
     def get(self, request):
         try:
@@ -450,7 +450,7 @@ class UserAlertsView(APIView):
         return Response(serializer.data)
 
 class MarkAlertReadView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanAccessCustomerSupport]
 
     def post(self, request, alert_id):
         try:
@@ -468,7 +468,7 @@ class MarkAlertReadView(APIView):
 
 class KnowledgeBaseListCreateView(generics.ListCreateAPIView):
     serializer_class = KnowledgeBaseSerializer
-    permission_classes = [permissions.IsAuthenticated] 
+    permission_classes = [permissions.IsAuthenticated,IsEmployeeAndCanManageAPI] 
 
     def get_queryset(self):
         target_user = get_company_user(self.request.user)
@@ -481,7 +481,7 @@ class KnowledgeBaseListCreateView(generics.ListCreateAPIView):
 class KnowledgeBaseRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
     queryset = KnowledgeBase.objects.all()
     serializer_class = KnowledgeBaseSerializer
-    permission_classes = [permissions.IsAuthenticated]  # optional
+    permission_classes = [permissions.IsAuthenticated,IsEmployeeAndCanManageAPI]
     lookup_field = 'id'
 
 class AnalyticsView(generics.GenericAPIView):
@@ -743,7 +743,7 @@ class AnalyticsView(generics.GenericAPIView):
 
 class SupportTicketViewSet(ModelViewSet):
     serializer_class = SupportTicketSerializer
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsEmployeeAndCanAccessCustomerSupport]
     queryset = SupportTicket.objects.all()
     def get_queryset(self):
         user = self.request.user
@@ -955,7 +955,7 @@ class LogoutAllSessionsView(APIView):
             return Response({"error": "Session not found"}, status=status.HTTP_404_NOT_FOUND)
 
 class MonthlyBookingsView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsEmployeeAndCanViewDashboard]
 
     def get(self, request):
         try:
@@ -1071,7 +1071,7 @@ class MonthlyBookingsView(APIView):
         }, status=status.HTTP_200_OK)
 
 class AITrainingFileBulkUploadView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsEmployeeAndCanManageAPI]
 
     def post(self, request):
         target_user = get_company_user(request.user)
@@ -1119,7 +1119,7 @@ class AITrainingFileBulkUploadView(APIView):
         return Response({"detail": "File deleted successfully"}, status=status.HTTP_200_OK)
 
 class BookingDaysView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsEmployeeAndCanViewDashboard]
     
     def get(self, request):
         target_user = get_company_user(request.user)
@@ -1248,7 +1248,7 @@ class ValidateTokenView(APIView):
         
         # Import UserSerializer here to avoid circular import
         from Accounts.serializers import UserSerializer
-        employee = Employee.objects.filter(email__iexact=request.user.email).first()
+        employee = Employee.objects.filter(email__iexact=result['user'].email).first()
         # Token is valid or refreshed successfully
         response_data = {
             "valid": True,
@@ -1261,7 +1261,7 @@ class ValidateTokenView(APIView):
         return Response(response_data, status=status.HTTP_200_OK)
 
 class KnowledgeCategoryView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsEmployeeAndCanManageAPI]
     
     def get(self, request):
         target_user = get_company_user(request.user)
@@ -1280,7 +1280,7 @@ class KnowledgeCategoryView(APIView):
         })
 
 class SyncKnowledgeView(APIView):
-    permission_classes = [permissions.IsAuthenticated]
+    permission_classes = [permissions.IsAuthenticated, IsEmployeeAndCanManageAPI]
 
     def post(self, request):
         try:

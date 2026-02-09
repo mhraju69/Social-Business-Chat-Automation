@@ -19,6 +19,7 @@ from .helper import *
 import logging
 import traceback
 from Accounts.utils import get_company_user
+from Accounts.permissions import *
 
 logger = logging.getLogger(__name__)
 # Create your views here.
@@ -57,7 +58,7 @@ def create_checkout_session_for_service(request):
 
 @csrf_exempt
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, IsEmployeeAndCanAccessBillingInvoices])
 def create_checkout_session_for_subscription(request):
     try:
         target_user = get_company_user(request.user)
@@ -83,7 +84,7 @@ def create_checkout_session_for_subscription(request):
 
 @csrf_exempt
 @api_view(["POST"])
-@permission_classes([IsAuthenticated])
+@permission_classes([IsAuthenticated, IsEmployeeAndCanAccessBillingInvoices])
 def start_stripe_connect(request):
     """API to start Stripe Connect onboarding."""
     # ... (same as before)
@@ -322,7 +323,7 @@ def get_payment(request,payment_id):
         return Response({"error": "Payment not found"}, status=404)
  
 class CheckPlan(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanAccessBillingInvoices]
 
     def get(self, request):
         target_user = get_company_user(request.user)
@@ -333,7 +334,7 @@ class CheckPlan(APIView):
         return Response(SubscriptionSerializer(paln,many=True).data)
 
 class CancelSubscriptionView(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanAccessBillingInvoices]
 
     def post(self, request):
         target_user = get_company_user(request.user)
@@ -364,7 +365,7 @@ class CancelSubscriptionView(APIView):
 
 
 class GetStripeConnectAccount(APIView):
-    permission_classes = [IsAuthenticated]
+    permission_classes = [IsAuthenticated, IsEmployeeAndCanAccessBillingInvoices]
 
     def get(self, request):
         target_user = get_company_user(request.user)
