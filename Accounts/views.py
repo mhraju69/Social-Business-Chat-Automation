@@ -24,7 +24,7 @@ class UserViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action == 'create':
             return [permissions.AllowAny()]
-        return [permissions.IsAuthenticated(), IsEmployeeAndCanManageUsers()]
+        return [permissions.IsAuthenticated()]
 
     def get_queryset(self):
         queryset = super().get_queryset()
