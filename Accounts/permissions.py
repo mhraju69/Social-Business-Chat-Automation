@@ -15,7 +15,7 @@ PERMISSIONS_MATRIX = {
     'finance': {
         'view_dashboard': True,
         'manage_users': False,
-        'financial_data': False,
+        'financial_data': True,
         'customer_support': False,
         'billing_invoices': True,
         'analytics_reports': False,
@@ -34,23 +34,23 @@ PERMISSIONS_MATRIX = {
     },
     'analyst': {
         'view_dashboard': True,
-        'manage_users': True,
+        'manage_users': False,
         'financial_data': True,
         'customer_support': False,
         'billing_invoices': False,
         'analytics_reports': True,
-        'system_settings': True,
+        'system_settings': False,
         'api_management': False,
     },
     'read_only': {
         'view_dashboard': True,
         'manage_users': False,
         'financial_data': True,
-        'customer_support': True,
+        'customer_support': False,
         'billing_invoices': True,
         'analytics_reports': True,
-        'system_settings': True,
-        'api_management': True,
+        'system_settings': False,
+        'api_management': False,
     }
 }
 
