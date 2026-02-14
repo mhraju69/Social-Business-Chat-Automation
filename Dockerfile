@@ -15,8 +15,9 @@ RUN pip install -r requirements.txt
 # Copy project
 COPY . .
 
-# Run database migrations
-RUN python manage.py makemigrations && python manage.py migrate
+# Run database migrations (moved to manual or runtime execution)
+# RUN python manage.py makemigrations && python manage.py migrate
+
 
 # Create folder for static files
 RUN mkdir -p /app/staticfiles

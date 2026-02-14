@@ -1,6 +1,19 @@
 version: '3'
 
 services:
+  db:
+    image: postgres:15
+    container_name: talkfusion_db
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
   web:
     build: .
     container_name: talkfusion_web
@@ -11,6 +24,7 @@ services:
       - "8080"
     depends_on:
       - redis
+      - db
     environment:
       - DJANGO_SETTINGS_MODULE=Talkfusion.settings
 
@@ -30,6 +44,7 @@ services:
     depends_on:
       - redis
       - web
+      - db
     restart: always
 
   celery_beat:
@@ -42,6 +57,7 @@ services:
     depends_on:
       - redis
       - web
+      - db
     restart: always
 
   nginx:
@@ -52,8 +68,12 @@ services:
       - "443:443"
     volumes:
       - ./default.conf:/etc/nginx/conf.d/default.conf
-      - ./staticfiles:/static
-      - ./media:/media
+      - ./staticfiles:/app/staticfiles
+      - ./media:/app/media
       - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - web
+
+volumes:
+  postgres_data:
+  
