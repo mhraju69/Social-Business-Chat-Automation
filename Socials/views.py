@@ -344,13 +344,13 @@ def instagram_callback(request):
              return HttpResponse({
                  "error": "No Instagram Business account found linked to your pages.",
                  "debug_info": analysis_logs,
-                 "hint": "নিশ্চিত করুন আপনার Instagram অ্যাকাউন্টটি Business বা Creator মোডে আছে এবং এটি Facebook পেজের সাথে সঠিকভাবে লিঙ্ক করা আছে।"
+                 "hint": "Make sure your Instagram account is in Business or Creator mode and is properly linked to the Facebook Page."
              }, status=400, content_type="application/json")
 
     if _from == "app":
         return render(request,'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/chat-profile")
+        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
 
 
 class ConnectWhatsappView(APIView):
@@ -516,7 +516,7 @@ def whatsapp_callback(request):
     if _from == "app":
         return render(request, 'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/chat-profile")
+        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
     
 
 class ChatProfileView(RetrieveUpdateAPIView):
