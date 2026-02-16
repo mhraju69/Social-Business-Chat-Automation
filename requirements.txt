@@ -112,3 +112,5 @@ django-redis
 pandas
 django_user_agents
 psycopg2-binary==2.9.10
+boto3
+django-storages

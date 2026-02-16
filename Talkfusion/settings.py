@@ -72,7 +72,7 @@ INSTALLED_APPS = [
     'Socials',
     'Finance',
     'admin_dashboard',
-
+    'storages',
     'drf_spectacular',
     'drf_spectacular_sidecar',
     'Ai',
@@ -254,3 +254,20 @@ from corsheaders.defaults import default_headers
 CORS_ALLOW_HEADERS = list(default_headers) + [
     'ngrok-skip-browser-warning',
 ]
+
+# AWS S3 Configuration
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID")        
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")    
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME")
+AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME") 
+AWS_QUERYSTRING_AUTH = False
+STORAGES = {
+    'default': {
+        'BACKEND': 'storages.backends.s3boto3.S3Boto3Storage',
+    },
+    'staticfiles': {
+        'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage',
+    },
+}
+
+MEDIA_URL = f'https://{AWS_STORAGE_BUCKET_NAME}.s3.amazonaws.com/'
