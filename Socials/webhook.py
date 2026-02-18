@@ -15,6 +15,13 @@ def unified_webhook(request, platform):
     """Generic webhook for WhatsApp, Facebook, Instagram"""
 
     if request.method == "GET":
+        # ১. যদি এটি Instagram OAuth এর কলব্যাক হয় (এতে 'code' থাকবে)
+        code = request.GET.get("code")
+        if platform == "instagram" and code:
+            from .views import instagram_callback
+            return instagram_callback(request)
+
+        # ২. স্ট্যান্ডার্ড Webhook ভেরিফিকেশন
         verify_token = platform
         token = request.GET.get("hub.verify_token")
         challenge = request.GET.get("hub.challenge")
@@ -121,27 +128,47 @@ def unified_webhook(request, platform):
                     return JsonResponse({"status": "no_entry"})
 
                 entry0 = entry[0]
-                profile_id = entry0.get("id")
+                profile_id = str(entry0.get("id"))
 
                 profile = ChatProfile.objects.filter(
                     platform="instagram",
                     profile_id=profile_id,
                     bot_active=True
                 ).first()
+                
                 if not profile:
-                    return JsonResponse({"status": "no_profile"})
+                    any_profile = ChatProfile.objects.filter(platform="instagram", bot_active=True).first()
+                    if any_profile:
+                        any_profile.profile_id = profile_id
+                        any_profile.save(update_fields=["profile_id"])
+                        profile = any_profile
+                    else:
+                        return JsonResponse({"status": "no_profile"})
 
-                changes = entry0.get("changes", [])
-                if not changes:
-                    return JsonResponse({"status": "no_changes"})
+                messaging = entry0.get("messaging", [])
+                if messaging:
+                    msg_event = messaging[0]
+                    client_id = msg_event.get("sender", {}).get("id")
+                    text = msg_event.get("message", {}).get("text", "")
+                else:
+                    changes = entry0.get("changes", [])
+                    if not changes:
+                        return JsonResponse({"status": "no_changes_or_messaging"})
 
-                change = changes[0].get("value", {})
-                client_id = change.get("from", {}).get("id")
-                text = change.get("message") or change.get("text", "")
+                    change = changes[0].get("value", {})
+                    client_id = change.get("from", {}).get("id")
+                    text = change.get("message") or change.get("text", "")
 
-                # Token count check
                 if not check_token_count(profile.user.company.id, 1):
                     return JsonResponse({"status": "error", "message": "Token limit reached."}, status=400)
+
+                try:
+                    user_url = f"https://graph.instagram.com/{client_id}?fields=username&access_token={profile.access_token}"
+                    user_res = requests.get(user_url)
+                    if user_res.status_code == 200:
+                        name = user_res.json().get("username", "Instagram User")
+                except Exception as e:
+                    print(f"Error fetching user profile: {e}")
 
             else:
                 return JsonResponse({"error": "Unknown platform"})
