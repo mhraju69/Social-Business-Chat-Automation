@@ -27,6 +27,8 @@ services:
       # - db
     environment:
       - DJANGO_SETTINGS_MODULE=Talkfusion.settings
+    env_file:
+      - .env
 
   redis:
     image: redis:7
@@ -45,6 +47,8 @@ services:
       - redis
       - web
       # - db
+    env_file:
+      - .env
     restart: always
 
   celery_beat:
@@ -58,6 +62,8 @@ services:
       - redis
       - web
       # - db
+    env_file:
+      - .env
     restart: always
 
   nginx:

@@ -328,7 +328,7 @@ def instagram_callback(request):
     if _from == "app":
         return render(request, 'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
+        return redirect(f"{settings.FRONTEND_URL}/user/chat-profile")
 
 
 class ConnectWhatsappView(APIView):
@@ -494,7 +494,7 @@ def whatsapp_callback(request):
     if _from == "app":
         return render(request, 'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
+        return redirect(f"{settings.FRONTEND_URL}/user/chat-profile")
     
 
 class ChatProfileView(RetrieveUpdateAPIView):
