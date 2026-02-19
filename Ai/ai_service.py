@@ -307,7 +307,8 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     try:
         company = Company.objects.get(id=company_id)
         company_name = company.name or "Unknown"
-    except:
+    except Exception as e:
+        logger.error(f"Error fetching company {company_id}: {e}")
         company = None
         company_name = "Unknown"
 
@@ -383,7 +384,11 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         - Treat semantically similar terms as the same (e.g., pricing = cost = plans).
         - Infer reasonable intent when the meaning is clear.
         - Ask clarifying questions ONLY if different interpretations would change the outcome.
-        - Always detect the language of the user's message.
+        ###LANGUAGE & TRANSLATION
+        - DETECT the language of the user's message.
+        - YOU MUST REPLY IN THE SAME LANGUAGE AS THE USER.
+        - If the user speaks a different language than the context (e.g. user speaks Spanish, context is English), YOU MUST TRANSLATE the information to the user's language.
+        - Do NOT reply in English if the user is not speaking English.
         - If the user mixes languages, reply in the language they mostly used.
         - If unclear, reply in the language of the first sentence.
 
@@ -619,7 +624,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
     cleaned_query = query.strip().lower().replace(',', '').replace('!', '').replace('.', '')
     is_generic_greeting = len(cleaned_query.split()) < 4 and any(g in cleaned_query for g in valid_greetings)
 
-    if company.greeting and company.greeting.strip():
+    if company and company.greeting and company.greeting.strip():
         if not ignore_greeting:
             if is_generic_greeting or len(query.strip()) < 3:
                 greeting_instruction = f"""
