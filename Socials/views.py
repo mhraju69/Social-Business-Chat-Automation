@@ -133,7 +133,7 @@ def facebook_callback(request):
     user_access_token = data["access_token"]
 
     # Debug token to check actual scopes
-    debug_url = "https://graph.facebook.com/debug_token"
+    debug_url = "https://graph.facebook.com/v20.0/debug_token"
     debug_params = {
         "input_token": user_access_token,
         "access_token": f"{settings.FB_APP_ID}|{settings.FB_APP_SECRET}"
@@ -195,27 +195,40 @@ def facebook_callback(request):
 
 
 class InstagramConnectView(APIView):
-    # permission_classes = [AllowAny]
     permission_classes = [IsAuthenticated, IsEmployeeAndCanManageAPI]
 
     def get(self, request):
-        fb_app_id = settings.FB_APP_ID
-        redirect_uri = request.build_absolute_uri(reverse("instagram_callback"))
-        if "ngrok" in redirect_uri and redirect_uri.startswith("http://"):
-            redirect_uri = redirect_uri.replace("http://", "https://")
-        print(f"😏😏😏 Connect Redirect URI: {redirect_uri}")
-        scope = "instagram_basic,instagram_manage_messages,pages_show_list,pages_manage_metadata,pages_read_engagement,business_management"
+        import urllib.parse
+        from django.conf import settings
+        
+        client_id = getattr(settings, 'IG_APP_ID', '1267330061816814')
+        backend_url = getattr(settings, 'BACKEND_URL', 'https://api.verseai.nl').rstrip('/')
+        path = reverse("unified_webhook", kwargs={"platform": "instagram"})
+        
+        redirect_uri = f"{backend_url}{path}"
+        if not redirect_uri.endswith('/'):
+            redirect_uri += '/'
+        
+        scope = "instagram_business_basic,instagram_business_manage_messages,instagram_business_manage_comments,instagram_business_content_publish,instagram_business_manage_insights"
         target_user = get_company_user(request.user)
-        state = target_user.id if target_user else request.user.id 
+        state_id = target_user.id if target_user else request.user.id 
+        _from = request.query_params.get('from', "web")
+        state = f"{state_id},{_from}"
 
-        fb_login_url = (
-            f"https://www.facebook.com/v20.0/dialog/oauth"
-            f"?client_id={fb_app_id}"
-            f"&redirect_uri={redirect_uri}"
-            f"&scope={scope}"
-            f"&state={state},{request.query_params.get('from',"web")}"
+        encoded_redirect_uri = urllib.parse.quote(redirect_uri, safe='')
+        encoded_scope = urllib.parse.quote(scope, safe='')
+        encoded_state = urllib.parse.quote(state, safe='')
+
+        instagram_auth_url = (
+            "https://www.instagram.com/oauth/authorize"
+            f"?force_reauth=true"
+            f"&client_id={client_id}"
+            f"&redirect_uri={encoded_redirect_uri}"
+            f"&scope={encoded_scope}"
+            f"&response_type=code"
+            f"&state={encoded_state}"
         )
-        return Response({"redirect_url":fb_login_url})
+        return Response({"redirect_url": instagram_auth_url})
 
 
 @api_view(['GET'])
@@ -224,133 +237,98 @@ def instagram_callback(request):
     code = request.GET.get("code")
     error = request.GET.get("error")
     state_data = request.GET.get("state")
-    state = state_data.split(",")[0]
-    _from = state_data.split(",")[1]
-    print("😏😏😏Instagram callback state:",state)
-    print("😏😏😏Instagram callback from:",_from)
+    
+    if state_data and "," in state_data:
+        state = state_data.split(",")[0]
+        _from = state_data.split(",")[1]
+    else:
+        state = state_data
+        _from = "web"
 
-    if error:
+    if error or not code:
         return HttpResponseRedirect(f"{settings.FRONTEND_URL}/user/integrations")
 
-    if not code:
-        return HttpResponseRedirect(f"{settings.FRONTEND_URL}/user/integrations")
+    from django.http import JsonResponse
+    backend_url = getattr(settings, 'BACKEND_URL', 'https://api.verseai.nl').rstrip('/')
+    path = reverse("unified_webhook", kwargs={"platform": "instagram"})
+    redirect_uri = f"{backend_url}{path}"
+    if not redirect_uri.endswith('/'):
+        redirect_uri += '/'
 
-    token_url = "https://graph.facebook.com/v20.0/oauth/access_token"
-    redirect_uri = request.build_absolute_uri(reverse("instagram_callback")).split('?')[0]
-    if "ngrok" in redirect_uri and redirect_uri.startswith("http://"):
-        redirect_uri = redirect_uri.replace("http://", "https://")
-    print(f"😏😏😏 Generated Redirect URI: {redirect_uri}")
-    print("checkpoint 1")
-    params = {
-        "client_id": settings.FB_APP_ID,
+    token_url = "https://api.instagram.com/oauth/access_token"
+    app_id = str(getattr(settings, 'IG_APP_ID', '1267330061816814')).strip()
+    app_secret = str(getattr(settings, 'IG_APP_SECRET', 'd3fbba1b0c2247c16144e7c10b7b397d')).strip()
+    
+    payload = {
+        "client_id": app_id,
+        "client_secret": app_secret,
+        "grant_type": "authorization_code",
         "redirect_uri": redirect_uri,
-        "client_secret": settings.FB_APP_SECRET,
         "code": code,
     }
-    resp = requests.get(token_url, params=params)
+    
+    resp = requests.post(token_url, data=payload)
     data = resp.json()
-    print("😏😏😏 Token Data:", data)
+    
     if "access_token" not in data:
-        return HttpResponse({"error": "Token exchange failed", "details": data}, status=400)
+        return JsonResponse({"error": "Instagram token exchange failed", "details": data}, status=400)
 
-    short_lived_token = data["access_token"]
-    print("checkpoint 2: Short-lived token received")
+    user_access_token = data["access_token"]
+    ig_user_id = data.get("user_id")
     
-    # Exchange for Long-lived User Token
-    exchange_url = "https://graph.facebook.com/v20.0/oauth/access_token"
+    exchange_url = "https://graph.instagram.com/access_token"
     exchange_params = {
-        "grant_type": "fb_exchange_token",
-        "client_id": settings.FB_APP_ID,
-        "client_secret": settings.FB_APP_SECRET,
-        "fb_exchange_token": short_lived_token,
+        "grant_type": "ig_exchange_token",
+        "client_secret": app_secret,
+        "access_token": user_access_token,
     }
+    
+    exchange_resp = requests.get(exchange_url, params=exchange_params)
+    exchange_data = exchange_resp.json()
+    long_lived_token = exchange_data.get("access_token", user_access_token)
+
     try:
-        exchange_resp = requests.get(exchange_url, params=exchange_params)
-        exchange_data = exchange_resp.json()
-        print("😏😏😏 Long-lived Token Data:", exchange_data)
-        user_access_token = exchange_data.get("access_token", short_lived_token)
-    except Exception as e:
-        print(f"Error exchanging token: {e}")
-        user_access_token = short_lived_token
-
-    print("checkpoint 3: Fetching pages")
-    pages_resp = requests.get(
-        "https://graph.facebook.com/v20.0/me/accounts",
-        params={"access_token": user_access_token}
-    )
-    pages_data = pages_resp.json()
-    print("😏😏😏 Pages Data:", pages_data)
-
-    if "data" not in pages_data:
-        return HttpResponse({"error": "No pages found", "details": pages_data}, status=400)
-
-    user = User.objects.get(id=state)
-
-    profile_created = False
-    
-    analysis_logs = []
-    print(f"checkpoint 4: Looping through {len(pages_data['data'])} pages")
-    for page in pages_data["data"]:
-        page_id = page["id"]
-        page_name = page.get("name")
-        page_token = page["access_token"] 
-        print(f"--- Checking Page: {page_name} ({page_id}) ---")
-
-        # We try to fetch multiple fields that might hold the IG account
-        insta_resp = requests.get(
-            f"https://graph.facebook.com/v20.0/{page_id}",
-            params={
-                "fields": "instagram_business_account,connected_instagram_account,name",
-                "access_token": page_token
-            }
-        )
-        insta_data = insta_resp.json()
-        print(f"😏😏😏 Page Meta Data: {insta_data}")
-        analysis_logs.append({
-            "page_name": page_name,
-            "page_id": page_id,
-            "api_response": insta_data
-        })
+        ig_me_url = "https://graph.instagram.com/me"
+        ig_me_params = {"fields": "id,username", "access_token": long_lived_token}
+        ig_me_resp = requests.get(ig_me_url, params=ig_me_params)
+        ig_me_data = ig_me_resp.json()
         
-        # Check both fields
-        insta_account = insta_data.get("instagram_business_account") or insta_data.get("connected_instagram_account")
+        final_ig_id = str(ig_me_data.get("id", ig_user_id))
+        profile_name = ig_me_data.get("username", "Instagram Business")
+        
+        biz_url = "https://graph.facebook.com/v22.0/me"
+        biz_params = {"fields": "id,instagram_business_account{id,username}", "access_token": long_lived_token}
+        biz_resp = requests.get(biz_url, params=biz_params)
+        biz_data = biz_resp.json()
+        
+        if "instagram_business_account" in biz_data:
+            final_ig_id = str(biz_data["instagram_business_account"]["id"])
+            profile_name = biz_data["instagram_business_account"].get("username", profile_name)
+    except Exception as e:
+        print(f"Error during profile fetching: {e}")
+        final_ig_id = str(ig_user_id)
+        profile_name = "Instagram Business"
 
-        if insta_account:
-            ig_id = insta_account["id"]
-            existing_ig_profile = ChatProfile.objects.filter(user=user, platform='instagram').first()
-            
-            if existing_ig_profile and existing_ig_profile.profile_id != ig_id:
-                continue
-            
-            if ChatProfile.objects.filter(user=user, platform='instagram').exclude(profile_id=ig_id).exists():
-                continue
+    try:
+        user = User.objects.get(id=state)
+    except (User.DoesNotExist, ValueError):
+        return JsonResponse({"error": "Associated dashboard user not found"}, status=404)
 
-            ChatProfile.objects.update_or_create(
-                profile_id=ig_id,
-                defaults={
-                    "user": user,
-                    "name": page_name, 
-                    "access_token": page_token,
-                    "bot_active": True,
-                    'platform': 'instagram',
-                },
-            )
-            profile_created = True
-    
-    if not profile_created:
-         if ChatProfile.objects.filter(user=user, platform='instagram').exists():
-             pass 
-         else:
-             return HttpResponse({
-                 "error": "No Instagram Business account found linked to your pages.",
-                 "debug_info": analysis_logs,
-                 "hint": "Make sure your Instagram account is in Business or Creator mode and is properly linked to the Facebook Page."
-             }, status=400, content_type="application/json")
+    ChatProfile.objects.update_or_create(
+        platform='instagram',
+        user=user,
+        defaults={
+            "profile_id": final_ig_id,
+            "name": profile_name,
+            "access_token": long_lived_token,
+            "bot_active": True,
+        }
+    )
 
     if _from == "app":
-        return render(request,'redirect.html')
+        return render(request, 'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
+        return redirect(f"{settings.FRONTEND_URL}/user/chat-profile")
 
 
 class ConnectWhatsappView(APIView):
@@ -516,7 +494,7 @@ def whatsapp_callback(request):
     if _from == "app":
         return render(request, 'redirect.html')
     else:
-        return redirect(f"{settings.FRONTEND_URL}/user/integrations")
+        return redirect(f"{settings.FRONTEND_URL}/user/chat-profile")
     
 
 class ChatProfileView(RetrieveUpdateAPIView):

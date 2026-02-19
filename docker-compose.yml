@@ -1,18 +1,18 @@
 version: '3'
 
 services:
-  db:
-    image: postgres:15
-    container_name: talkfusion_db
-    restart: always
-    environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
+  # db:
+  #   image: postgres:15
+  #   container_name: talkfusion_db
+  #   restart: always
+  #   environment:
+  #     POSTGRES_DB: ${DB_NAME}
+  #     POSTGRES_USER: ${DB_USER}
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD}
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5432:5432"
 
   web:
     build: .
@@ -24,9 +24,11 @@ services:
       - "8080"
     depends_on:
       - redis
-      - db
+      # - db
     environment:
       - DJANGO_SETTINGS_MODULE=Talkfusion.settings
+    env_file:
+      - .env
 
   redis:
     image: redis:7
@@ -44,7 +46,9 @@ services:
     depends_on:
       - redis
       - web
-      - db
+      # - db
+    env_file:
+      - .env
     restart: always
 
   celery_beat:
@@ -57,7 +61,9 @@ services:
     depends_on:
       - redis
       - web
-      - db
+      # - db
+    env_file:
+      - .env
     restart: always
 
   nginx:
@@ -74,6 +80,5 @@ services:
     depends_on:
       - web
 
-volumes:
-  postgres_data:
-  
+# volumes:
+#   postgres_data:

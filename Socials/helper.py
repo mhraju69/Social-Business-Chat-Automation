@@ -33,9 +33,12 @@ def send_message(profile: ChatProfile, client_obj: ChatClient, message_text):
             res_data = response.json()
 
         elif profile.platform == "instagram":
-            url = f"https://graph.facebook.com/v20.0/{profile.profile_id}/messages"
+            url = f"https://graph.instagram.com/v22.0/me/messages"
             params = {"access_token": profile.access_token}
-            payload = {"recipient": {"id": client_obj.client_id}, "message": {"text": message_text}}
+            payload = {
+                "recipient": {"id": client_obj.client_id},
+                "message": {"text": message_text}
+            }
             response = requests.post(url, params=params, json=payload)
             res_data = response.json()
 

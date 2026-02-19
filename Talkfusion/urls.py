@@ -15,7 +15,7 @@ urlpatterns = [
     path('api/finance/', include('Finance.urls')),
     path('api/chat/', include('Socials.urls')),
     path('connect/', Connect),
-    path("webhook/<str:platform>/", unified_webhook, name="unified_webhook"),
+    path("api/webhook/<str:platform>/", unified_webhook, name="unified_webhook"),
     path('facebook/callback/', facebook_callback, name="facebook_callback"),  
     path('instagram/callback/', instagram_callback, name="instagram_callback"),
     path('whatsapp/callback/', whatsapp_callback, name="whatsapp_callback"),
