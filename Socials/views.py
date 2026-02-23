@@ -287,25 +287,31 @@ def instagram_callback(request):
     exchange_data = exchange_resp.json()
     long_lived_token = exchange_data.get("access_token", user_access_token)
 
+    # Try to resolve ID safely
     try:
+        # 1. Fetch basic info (always available)
         ig_me_url = "https://graph.instagram.com/me"
         ig_me_params = {"fields": "id,username", "access_token": long_lived_token}
-        ig_me_resp = requests.get(ig_me_url, params=ig_me_params)
-        ig_me_data = ig_me_resp.json()
+        ig_me_data = requests.get(ig_me_url, params=ig_me_params).json()
         
         final_ig_id = str(ig_me_data.get("id", ig_user_id))
         profile_name = ig_me_data.get("username", "Instagram Business")
-        
-        biz_url = "https://graph.facebook.com/v22.0/me"
-        biz_params = {"fields": "id,instagram_business_account{id,username}", "access_token": long_lived_token}
-        biz_resp = requests.get(biz_url, params=biz_params)
-        biz_data = biz_resp.json()
-        
-        if "instagram_business_account" in biz_data:
-            final_ig_id = str(biz_data["instagram_business_account"]["id"])
-            profile_name = biz_data["instagram_business_account"].get("username", profile_name)
+        print(f"🔍 [Instagram Callback] Basic Data: {ig_me_data}")
+
+        # 2. Optionally try to get ig_id (numeric business ID) without breaking if not available
+        try:
+            ig_id_params = {"fields": "ig_id", "access_token": long_lived_token}
+            ig_id_resp = requests.get(ig_me_url, params=ig_id_params).json()
+            if "ig_id" in ig_id_resp:
+                final_ig_id = str(ig_id_resp["ig_id"])
+                print(f"✨ [Instagram Callback] Found ig_id: {final_ig_id}")
+            elif "error" in ig_id_resp:
+                print(f"ℹ️ [Instagram Callback] ig_id field not supported for this account: {ig_id_resp['error'].get('message')}")
+        except Exception as e:
+             print(f"ℹ️ [Instagram Callback] Skipping ig_id fetch: {e}")
+            
     except Exception as e:
-        print(f"Error during profile fetching: {e}")
+        print(f"❌ [Instagram Callback] Error during ID resolution: {e}")
         final_ig_id = str(ig_user_id)
         profile_name = "Instagram Business"
 
@@ -314,7 +320,7 @@ def instagram_callback(request):
     except (User.DoesNotExist, ValueError):
         return JsonResponse({"error": "Associated dashboard user not found"}, status=404)
 
-    ChatProfile.objects.update_or_create(
+    profile, created = ChatProfile.objects.update_or_create(
         platform='instagram',
         user=user,
         defaults={
@@ -324,6 +330,37 @@ def instagram_callback(request):
             "bot_active": True,
         }
     )
+    print(f"✅ [Instagram] Profile {'created' if created else 'updated'}: {profile_name} ({final_ig_id})")
+
+    # 🔗 CRITICAL STEP: Subscribe the account to receive webhook messages
+    # Instagram Login tokens ONLY work with graph.instagram.com (not graph.facebook.com)
+    try:
+        sub_url = "https://graph.instagram.com/v22.0/me/subscribed_apps"
+        sub_res = requests.post(sub_url, params={
+            "subscribed_fields": "messages,messaging_postbacks,messaging_seen",
+            "access_token": long_lived_token
+        }).json()
+        
+        if sub_res.get("success"):
+            print(f"🔔 [Instagram] ✅ Webhook subscription SUCCESS for {profile_name} ({final_ig_id})")
+        else:
+            print(f"⚠️ [Instagram] Subscription response: {sub_res}")
+            # Fallback: Try via Facebook Graph API (for Page-linked accounts)
+            try:
+                page_res = requests.get("https://graph.facebook.com/v22.0/me/accounts",
+                                        params={"access_token": long_lived_token}).json()
+                for page in page_res.get("data", []):
+                    page_sub = requests.post(
+                        f"https://graph.facebook.com/v22.0/{page['id']}/subscribed_apps",
+                        params={"subscribed_fields": "messages,messaging_postbacks,message_echoes",
+                                "access_token": page.get("access_token")}
+                    ).json()
+                    print(f"🔔 [Instagram] FB Page sub for {page['id']}: {page_sub}")
+            except Exception as fb_e:
+                print(f"ℹ️ [Instagram] FB fallback subscription skipped: {fb_e}")
+
+    except Exception as e:
+        print(f"❌ [Instagram] Webhook subscription error: {e}")
 
     if _from == "app":
         return render(request, 'redirect.html')
