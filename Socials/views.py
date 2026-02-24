@@ -587,10 +587,11 @@ class ChatProfileView(RetrieveUpdateAPIView):
         if not target_user:
              raise NotFound("Company user not found.")
         
-        try:
-            return ChatProfile.objects.filter(user=target_user, platform=platform).first()
-        except ChatProfile.DoesNotExist:
-            raise NotFound(detail=f"ChatProfile with platform '{platform}' not found.")
+        profile = ChatProfile.objects.filter(user=target_user, platform=platform).first()
+        if not profile:
+             raise NotFound(detail=f"ChatProfile with platform '{platform}' not found.")
+        
+        return profile
 
 
 class ChatProfileListView(ListAPIView):
