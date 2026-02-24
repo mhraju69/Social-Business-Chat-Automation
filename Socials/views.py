@@ -21,6 +21,7 @@ from Accounts.utils import get_company_user
 from collections import Counter
 from django.http import HttpResponseRedirect,HttpResponse
 from Accounts.permissions import *
+from .consumers import send_alert
 # Create your views here.
 
 
@@ -187,6 +188,8 @@ def facebook_callback(request):
             }
         )
         saved_pages.append(page_id)
+
+    send_alert(user,"Your facebook page is now connected.")
         
     if _from == "app":
         return render(request,'redirect.html')
@@ -331,6 +334,7 @@ def instagram_callback(request):
         }
     )
     print(f"✅ [Instagram] Profile {'created' if created else 'updated'}: {profile_name} ({final_ig_id})")
+    send_alert(user, "Your instagram page is now connected.")
 
     # 🔗 CRITICAL STEP: Subscribe the account to receive webhook messages
     # Instagram Login tokens ONLY work with graph.instagram.com (not graph.facebook.com)
@@ -361,7 +365,7 @@ def instagram_callback(request):
 
     except Exception as e:
         print(f"❌ [Instagram] Webhook subscription error: {e}")
-
+    
     if _from == "app":
         return render(request, 'redirect.html')
     else:
@@ -528,6 +532,8 @@ def whatsapp_callback(request):
         
         # For now, only save the first phone number
     
+    send_alert(user, "Your WhatsApp account is now connected.")
+
     if _from == "app":
         return render(request, 'redirect.html')
     else:

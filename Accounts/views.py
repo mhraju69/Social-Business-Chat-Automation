@@ -20,6 +20,7 @@ from django.shortcuts import redirect
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from drf_spectacular.utils import extend_schema
+# from Ai.tasks import sync_company_knowledge_task
 
 class UserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
@@ -185,6 +186,12 @@ class ServiceRetrieveUpdateDestroyView(generics.RetrieveUpdateDestroyAPIView):
         # Only allow access to services belonging to the user’s company or owner's company
         target_user = get_company_user(self.request.user)
         return Service.objects.filter(company__user=target_user)
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        instance.delete()
     
 class AddEmployeeView(APIView):
     permission_classes = [permissions.IsAuthenticated,IsOwner,IsEmployeeAndCanManageUsers]

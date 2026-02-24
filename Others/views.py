@@ -883,9 +883,8 @@ class GoogleOAuthCallbackView(APIView):
         google_calendar.scopes = ["https://www.googleapis.com/auth/calendar"]
         google_calendar.save()
 
-        # return Response(
-        #     {"message": "Google Calendar connected successfully!"}
-        # )
+        send_alert(user, "Your Google Calendar account is now connected.")
+        
         if method == "app":
             return render(request, 'redirect.html')
         return redirect(f"{settings.FRONTEND_URL}/user/agenda-integration")
@@ -1089,9 +1088,6 @@ class AITrainingFileBulkUploadView(APIView):
             created_files.append(ai_file)
             
         serializer = AITrainingFileSerializer(created_files, many=True)
-        
-        # Trigger knowledge sync after upload in background
-        sync_company_knowledge_task.delay(company.id)
         
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     

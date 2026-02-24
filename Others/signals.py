@@ -1,6 +1,7 @@
-from django.db.models.signals import post_save
+from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
-from .models import Booking
+from django.db import transaction
+from .models import Booking, KnowledgeBase, FAQ, OpeningHours, AITrainingFile, Company
 from Finance.helper import create_stripe_checkout_for_service
 from django.utils import timezone
 from .task import send_booking_reminder
@@ -66,3 +67,46 @@ def schedule_booking_reminder(sender, instance, created, **kwargs):
         print(f"❌ Error scheduling reminder: {str(e)}")
         import traceback
         traceback.print_exc()
+
+def trigger_ai_sync(company_id):
+    if not company_id:
+        return
+    from Ai.tasks import sync_company_knowledge_task
+    transaction.on_commit(lambda: sync_company_knowledge_task.delay(company_id))
+
+def get_company_id_for_user(user):
+    company = Company.objects.filter(user=user).first()
+    return company.id if company else None
+
+# Signals for AI Knowledge Sync
+@receiver(post_save, sender=KnowledgeBase)
+def sync_on_kb_save(sender, instance, **kwargs):
+    trigger_ai_sync(get_company_id_for_user(instance.user))
+
+@receiver(post_delete, sender=KnowledgeBase)
+def sync_on_kb_delete(sender, instance, **kwargs):
+    trigger_ai_sync(get_company_id_for_user(instance.user))
+
+@receiver(post_save, sender=FAQ)
+def sync_on_faq_save(sender, instance, **kwargs):
+    trigger_ai_sync(instance.company.id)
+
+@receiver(post_delete, sender=FAQ)
+def sync_on_faq_delete(sender, instance, **kwargs):
+    trigger_ai_sync(instance.company.id)
+
+@receiver(post_save, sender=OpeningHours)
+def sync_on_hours_save(sender, instance, **kwargs):
+    trigger_ai_sync(instance.company.id)
+
+@receiver(post_delete, sender=OpeningHours)
+def sync_on_hours_delete(sender, instance, **kwargs):
+    trigger_ai_sync(instance.company.id)
+
+@receiver(post_save, sender=AITrainingFile)
+def sync_on_ai_file_save(sender, instance, **kwargs):
+    trigger_ai_sync(instance.company.id)
+
+@receiver(post_delete, sender=AITrainingFile)
+def sync_on_ai_file_delete(sender, instance, **kwargs):
+    trigger_ai_sync(instance.company.id)

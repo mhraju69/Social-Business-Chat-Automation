@@ -1,6 +1,8 @@
 from celery import shared_task
 from Ai.rag_ingestion import process_company_knowledge
 from Ai.data_analysis import analyze_company_data
+from Socials.consumers import send_alert
+from Accounts.models import Company
 import logging
 
 logger = logging.getLogger(__name__)
@@ -16,6 +18,7 @@ def sync_company_knowledge_task(company_id):
         logger.info(f"CELERY: Refreshing analysis cache for company {company_id}")
         analyze_company_data(company_id, force_refresh=True)
         
+        send_alert(Company.objects.get(id=company_id), "Your knowledge base is now updated.")
         return f"Success: Company {company_id} synced and analysis refreshed"
     except Exception as e:
         logger.error(f"CELERY ERROR: Failed to sync knowledge for company {company_id}: {str(e)}")
