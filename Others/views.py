@@ -352,26 +352,6 @@ class FinanceDataView(APIView):
 
         return Response(data)
 
-class ConnectGoogleCalendarView(APIView):
-    permission_classes = [IsAuthenticated, IsEmployeeAndCanAccessSystemSettings]
-
-    def post(self, request):
-        target_user = get_company_user(request.user)
-        if not target_user:
-             return Response({"error": "User has no company"}, status=404)
-
-        company = Company.objects.filter(user=target_user).first()
-        method = request.data.get("from", "web")
-        if not company:
-            return Response(
-                {"error": "Company not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        # logic for google calendar oauth
-        auth_url = get_google_auth_url(company.id, method)
-        return Response({"auth_url": auth_url})
-
 class OpeningHoursCreateView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsEmployeeAndCanAccessSystemSettings]
     def post(self, request):

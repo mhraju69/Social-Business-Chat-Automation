@@ -336,6 +336,8 @@ def create_booking(request,company_id,data=None):
     end_dt = None
     start_utc = None
     end_utc = None
+    calendar_start_utc = None
+    calendar_end_utc = None
 
     if 'start_time' in data:
         start_time_local = data['start_time']
@@ -415,8 +417,13 @@ def create_booking(request,company_id,data=None):
         try:
             access_token = get_google_access_token(google_account)
             if not access_token:
-                calendar_error = "Unable to get access token from refresh token"
+                calendar_error = "Unable to get access token from refresh token. Your Google connection may have expired. Please try reconnecting your Google account."
                 print(f"❌ Google Calendar Error: {calendar_error}")
+                try:
+                    from Socials.consumers import send_alert
+                    send_alert(company, "Google Calendar Error", subtitle=calendar_error, type="error")
+                except:
+                    pass
             else:
                 # Use the calculated UTC times for Google Calendar
                 # We send timeZone="UTC" because we already converted to UTC
@@ -424,6 +431,13 @@ def create_booking(request,company_id,data=None):
                 start_val = calendar_start_utc if calendar_start_utc else booking.start_time
                 end_val = calendar_end_utc if calendar_end_utc else (booking.end_time or booking.start_time)
                 
+                # Basic email validation for attendees
+                attendees = []
+                if booking.client and "@" in booking.client:
+                    attendees.append({"email": booking.client})
+                else:
+                    print(f"⚠️ Skipping attendee because email is invalid or missing: {booking.client}")
+
                 # Prepare event data
                 event_data = {
                     "summary": booking.title,
@@ -437,7 +451,7 @@ def create_booking(request,company_id,data=None):
                         "timeZone": "UTC"
                     },
                     "location": booking.location or "",
-                    "attendees": [{"email": booking.client}] if booking.client else [],
+                    "attendees": attendees,
                 }
                 
                 print(f"📅 Creating Google Calendar event...")
@@ -460,8 +474,17 @@ def create_booking(request,company_id,data=None):
                     booking.save()
                     print(f"✅ Google Calendar event created: {booking.event_link}")
                 else:
-                    calendar_error = response.json()
+                    try:
+                        error_data = response.json()
+                        calendar_error = error_data.get('error', {}).get('message', str(error_data))
+                    except:
+                        calendar_error = response.text
                     print(f"❌ Google Calendar API Error: {calendar_error}")
+                    try:
+                        from Socials.consumers import send_alert
+                        send_alert(company, "Google Calendar API Error", subtitle=str(calendar_error)[:255], type="error")
+                    except:
+                        pass
                     
         except Exception as e:
             calendar_error = str(e)
