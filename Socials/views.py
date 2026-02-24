@@ -177,14 +177,26 @@ def facebook_callback(request):
         # This token is already long-lived because we used long-lived user token to fetch accounts
         page_access_token = page["access_token"] 
 
+        # Check if this page is already connected by another user
+        existing_profile = ChatProfile.objects.filter(profile_id=page_id, platform="facebook").first()
+        if existing_profile and existing_profile.user != user:
+            prev_user = existing_profile.user
+            existing_profile.delete()
+            send_alert(
+                prev_user, 
+                "Account Disconnected", 
+                f"Your Facebook page '{page_name}' was connected by another user and has been removed from your account.", 
+                type="warning"
+            )
+
         fb_profile, created = ChatProfile.objects.update_or_create(
             profile_id=page_id,
+            platform="facebook",
             defaults={
                 "user": user,
                 "name": page_name,
                 "access_token": page_access_token,
                 "bot_active": True,
-                "platform": "facebook",
             }
         )
         saved_pages.append(page_id)
@@ -323,11 +335,23 @@ def instagram_callback(request):
     except (User.DoesNotExist, ValueError):
         return JsonResponse({"error": "Associated dashboard user not found"}, status=404)
 
+    # Check if this account is already connected by another user
+    existing_profile = ChatProfile.objects.filter(profile_id=final_ig_id, platform='instagram').first()
+    if existing_profile and existing_profile.user != user:
+        prev_user = existing_profile.user
+        existing_profile.delete()
+        send_alert(
+            prev_user, 
+            "Account Disconnected", 
+            f"Your Instagram account '{profile_name}' was connected by another user and has been removed from your account.", 
+            type="warning"
+        )
+
     profile, created = ChatProfile.objects.update_or_create(
         platform='instagram',
-        user=user,
+        profile_id=final_ig_id,
         defaults={
-            "profile_id": final_ig_id,
+            "user": user,
             "name": profile_name,
             "access_token": long_lived_token,
             "bot_active": True,
@@ -511,15 +535,27 @@ def whatsapp_callback(request):
         display_phone_number = phone.get("display_phone_number", "")
         verified_name = phone.get("verified_name", "")
         
+        # Check if this phone number is already connected by another user
+        existing_profile = ChatProfile.objects.filter(profile_id=phone_number_id, platform="whatsapp").first()
+        if existing_profile and existing_profile.user != user:
+            prev_user = existing_profile.user
+            existing_profile.delete()
+            send_alert(
+                prev_user, 
+                "Account Disconnected", 
+                f"Your WhatsApp account '{verified_name or display_phone_number}' was connected by another user and has been removed from your account.", 
+                type="warning"
+            )
+
         # Create or update the WhatsApp ChatProfile
         whatsapp_profile, created = ChatProfile.objects.update_or_create(
             profile_id=phone_number_id,
+            platform="whatsapp",
             defaults={
                 "user": user,
                 "name": verified_name or display_phone_number,
                 "access_token": access_token,
                 "bot_active": True,
-                "platform": "whatsapp",
             }
         )
         
