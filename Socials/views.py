@@ -196,7 +196,7 @@ def facebook_callback(request):
                 "user": user,
                 "name": page_name,
                 "access_token": page_access_token,
-                "bot_active": True,
+                "bot_active": False,
             }
         )
         saved_pages.append(page_id)
@@ -354,7 +354,7 @@ def instagram_callback(request):
             "user": user,
             "name": profile_name,
             "access_token": long_lived_token,
-            "bot_active": True,
+            "bot_active": False,
         }
     )
     print(f"✅ [Instagram] Profile {'created' if created else 'updated'}: {profile_name} ({final_ig_id})")
@@ -555,7 +555,7 @@ def whatsapp_callback(request):
                 "user": user,
                 "name": verified_name or display_phone_number,
                 "access_token": access_token,
-                "bot_active": True,
+                "bot_active": False,
             }
         )
         
