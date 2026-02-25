@@ -220,13 +220,13 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def get_user_profiles(self, user):
         """User এর সব active profiles"""
-        return list(ChatProfile.objects.filter(user=user, bot_active=True))
+        return list(ChatProfile.objects.filter(user=user))
 
     @database_sync_to_async
     def get_rooms_list(self, user, platform=None):
         """User এর সব rooms with latest message"""
         from django.db.models import OuterRef, Subquery
-        profiles = ChatProfile.objects.filter(user=user, bot_active=True)
+        profiles = ChatProfile.objects.filter(user=user)
         if platform:
             profiles = profiles.filter(platform=platform)
 
@@ -260,7 +260,7 @@ class GlobalChatConsumer(AsyncWebsocketConsumer):
         """Specific room এর messages"""
         try:
             profile = ChatProfile.objects.get(
-                user=user, platform=platform, bot_active=True
+                user=user, platform=platform
             )
             client = ChatClient.objects.get(platform=platform, client_id=client_id)
             room = ChatRoom.objects.get(profile=profile, client=client)

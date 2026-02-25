@@ -20,6 +20,7 @@ urlpatterns = [
     path('company/employee/check-permissions/<int:employee_id>/', GetPermissionsView.as_view(), name='employee-list'),
     path('company/employee/update-permissions/<int:employee_id>/', UpdatePermissionsView.as_view(), name='employee-list'),
     path('google/login/',SocialAuthCallbackView.as_view()),
+    path('apple/login/', AppleLoginView.as_view()),
     path('reset-password/',ResetPassword.as_view()),
     path('logout-session/<int:session_id>/', LogoutSessionView.as_view()),
     path('logout-all-sessions/', LogoutAllSessionsView.as_view()),

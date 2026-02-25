@@ -7,6 +7,34 @@ logger = logging.getLogger(__name__)
 from django.core.mail import EmailMultiAlternatives
 from django.template.loader import render_to_string
 from Others.models import UserSession
+import jwt
+from jwt.algorithms import RSAAlgorithm
+
+def verify_apple_id_token(token):
+    try:
+        header = jwt.get_unverified_header(token)
+        kid = header.get('kid')
+        
+        # Get Apple's public keys
+        apple_keys = requests.get('https://appleid.apple.com/auth/keys').json()
+        
+        # Find the matching key
+        public_key_data = next(key for key in apple_keys['keys'] if key['kid'] == kid)
+        public_key = RSAAlgorithm.from_jwk(public_key_data)
+        
+        # Verify the token
+        decoded = jwt.decode(
+            token,
+            public_key,
+            algorithms=['RS256'],
+            audience=settings.APPLE_CLIENT_ID,
+            issuer='https://appleid.apple.com'
+        )
+        return decoded
+    except Exception as e:
+        print(f"Apple verification error: {e}")
+        return None
+
 
 def send_otp(email, task=None):
     if not email:

@@ -2,6 +2,8 @@ from rest_framework.serializers import ModelSerializer,ValidationError
 from .models import *
 from Ai.tasks import analyze_company_data
 from Accounts.models import Company
+from Socials.consumers import send_alert
+
 class ChatProfileSerializers(ModelSerializer):
     class Meta:
         model = ChatProfile
@@ -17,8 +19,18 @@ class ChatProfileSerializers(ModelSerializer):
                 f"You need to complete at least 80% of the knowledge base to activate the bot. "
                 f"Current knowledge base score is {analysis['dataHealth']['score']}%."
             )
+        elif validated_data.get('bot_active') == True and instance.is_approved == False:
+            raise ValidationError(
+                "Your account is not approved by the admin. Please wait for the approval."
+            )
         else:
             instance.bot_active = validated_data.get('bot_active', instance.bot_active)
+
+            if instance.bot_active:
+                send_alert(company,"Your bot is now active.")
+            else:
+                send_alert(company,"Your bot is now deactivated.")
+
         instance.save()
         
         return instance

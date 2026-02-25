@@ -25,6 +25,7 @@ from django.core.mail import send_mail
 from .models import AdminActivity, UserPlanRequest
 from Finance.serializers import SubscriptionSerializer, PlanSerializers
 from Finance.helper import create_stripe_checkout_for_subscription
+from Socials.consumers import send_alert
 
 class DashboardView(generics.GenericAPIView):
     permission_classes = [IsAdmin]
@@ -269,6 +270,7 @@ class ApproveChannelsView(APIView):
                 profile = ChatProfile.objects.get(id=chat_profile_id)
                 profile.is_approved = True
                 profile.save()
+                send_alert(profile.user, "Chat Profile Approved", f"Your {profile.platform} profile has been approved by admin.", type="success")
                 return Response({"status": f"Chat profile {chat_profile_id} approved."})
             
             except ChatProfile.DoesNotExist:
@@ -317,7 +319,11 @@ class RejectChannelsView(APIView):
                 profile = ChatProfile.objects.get(id=chat_profile_id)
                 if profile.is_approved:
                     return Response({"error": f"Chat profile {chat_profile_id} is already approved and cannot be rejected."}, status=400)
+                
+                user = profile.user
+                platform = profile.platform
                 profile.delete()
+                send_alert(user, "Chat Profile Rejected", f"Your {platform} profile has been rejected and removed by admin.", type="error")
                 return Response({"status": f"Chat profile {chat_profile_id} rejected."})
             
             except ChatProfile.DoesNotExist:
@@ -701,6 +707,7 @@ class ApproveUserPlanRequestView(generics.GenericAPIView):
                 [plan_request.user.email],
                 fail_silently=True,
             )
+            send_alert(plan_request.user, "Custom Plan Approved", "Your request for a custom plan has been approved. Check your email for payment details.", type="success")
             return Response({"message": "Plan request approved successfully."}, status=200)
         except UserPlanRequest.DoesNotExist:
             return Response({"error": "Plan request not found or already approved."}, status=400)
@@ -737,6 +744,8 @@ class ApproveUserPlanRequestView(generics.GenericAPIView):
                 [plan_request.user.email],
                 fail_silently=True,
             )
+            send_alert(plan_request.user, "Plan Request Declined", "Your request for a custom plan has been declined by the admin.", type="error")
+            plan_request.delete()
             return Response(
                 {"message": "User plan request deleted successfully."},
                 status=200

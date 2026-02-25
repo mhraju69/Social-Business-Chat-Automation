@@ -352,26 +352,6 @@ class FinanceDataView(APIView):
 
         return Response(data)
 
-class ConnectGoogleCalendarView(APIView):
-    permission_classes = [IsAuthenticated, IsEmployeeAndCanAccessSystemSettings]
-
-    def post(self, request):
-        target_user = get_company_user(request.user)
-        if not target_user:
-             return Response({"error": "User has no company"}, status=404)
-
-        company = Company.objects.filter(user=target_user).first()
-        method = request.data.get("from", "web")
-        if not company:
-            return Response(
-                {"error": "Company not found"},
-                status=status.HTTP_404_NOT_FOUND
-            )
-        
-        # logic for google calendar oauth
-        auth_url = get_google_auth_url(company.id, method)
-        return Response({"auth_url": auth_url})
-
 class OpeningHoursCreateView(APIView):
     permission_classes = [permissions.IsAuthenticated, IsEmployeeAndCanAccessSystemSettings]
     def post(self, request):
@@ -883,9 +863,8 @@ class GoogleOAuthCallbackView(APIView):
         google_calendar.scopes = ["https://www.googleapis.com/auth/calendar"]
         google_calendar.save()
 
-        # return Response(
-        #     {"message": "Google Calendar connected successfully!"}
-        # )
+        send_alert(user, "Your Google Calendar account is now connected.")
+        
         if method == "app":
             return render(request, 'redirect.html')
         return redirect(f"{settings.FRONTEND_URL}/user/agenda-integration")
@@ -1089,9 +1068,6 @@ class AITrainingFileBulkUploadView(APIView):
             created_files.append(ai_file)
             
         serializer = AITrainingFileSerializer(created_files, many=True)
-        
-        # Trigger knowledge sync after upload in background
-        sync_company_knowledge_task.delay(company.id)
         
         return Response(serializer.data, status=status.HTTP_201_CREATED)
     
