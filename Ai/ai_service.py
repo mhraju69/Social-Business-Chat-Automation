@@ -221,7 +221,7 @@ def get_multi_day_availability(company_id: int, days: int = 7, duration_minutes:
             
     return availability
 
-def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] = None, tone: str = "professional") -> dict:
+def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] = None, tone: str = "professional", force_ignore_greeting: bool = False) -> dict:
     print(f"\n🚀 --- get_ai_response started (Company: {company_id}, Tone: {tone}) ---")
     """
     Generates an AI response for a specific company using RAG.
@@ -601,7 +601,11 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         logger.warning(f"Greeting Logic: Stack inspection error: {e}")
 
     ignore_greeting = False
-    if room_id:
+    # If called from Test Chat (no room_id in stack), use the explicit flag
+    if force_ignore_greeting:
+        ignore_greeting = True
+        logger.info("Greeting Logic: Skipping greeting (force_ignore_greeting=True, likely Test Chat with history).")
+    elif room_id:
         try:
             from Socials.models import ChatRoom
             room = ChatRoom.objects.get(id=room_id)

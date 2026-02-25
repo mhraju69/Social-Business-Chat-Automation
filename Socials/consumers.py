@@ -501,7 +501,8 @@ class TestChatConsumer(AsyncWebsocketConsumer):
             self.company.id, 
             user_message, 
             history=history, 
-            tone="friendly"
+            tone="friendly",
+            force_ignore_greeting=len(history) > 0  # history থাকলে greeting স্কিপ করো
         )
         return response
     
