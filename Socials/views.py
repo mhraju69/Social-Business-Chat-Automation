@@ -349,9 +349,9 @@ def instagram_callback(request):
 
     profile, created = ChatProfile.objects.update_or_create(
         platform='instagram',
-        profile_id=final_ig_id,
+        user=user,
         defaults={
-            "user": user,
+            "profile_id": final_ig_id,
             "name": profile_name,
             "access_token": long_lived_token,
             "bot_active": False,
@@ -549,10 +549,10 @@ def whatsapp_callback(request):
 
         # Create or update the WhatsApp ChatProfile
         whatsapp_profile, created = ChatProfile.objects.update_or_create(
-            profile_id=phone_number_id,
             platform="whatsapp",
+            user=user,
             defaults={
-                "user": user,
+                "profile_id": phone_number_id,
                 "name": verified_name or display_phone_number,
                 "access_token": access_token,
                 "bot_active": False,
