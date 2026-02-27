@@ -399,6 +399,7 @@ def instagram_callback(request):
 class ConnectWhatsappView(APIView):
     permission_classes = [IsAuthenticated, IsEmployeeAndCanManageAPI]
     def get(self, request):
+        import urllib.parse
         target_user = get_company_user(request.user)
         if not target_user:
             return Response({"error": "User not found (company user)"}, status=404)
@@ -409,11 +410,22 @@ class ConnectWhatsappView(APIView):
             return Response({"error": "Company not found"}, status=404)
     
         state = target_user.id
-        redirect_url = request.build_absolute_uri(reverse("whatsapp_callback"))
-        if "ngrok" in redirect_url and redirect_url.startswith("http://"):
-            redirect_url = redirect_url.replace("http://", "https://")
+        callback_url = request.build_absolute_uri(reverse("whatsapp_callback"))
+        if "ngrok" in callback_url and callback_url.startswith("http://"):
+            callback_url = callback_url.replace("http://", "https://")
 
-        redirect_url = f"https://www.facebook.com/v19.0/dialog/oauth?client_id={settings.FB_APP_ID}&redirect_uri={redirect_url}&state={state},{request.query_params.get('from','web')}&response_type=code&config_id={settings.WHATSAPP_CONFIG_ID}"
+        # ✅ Fix 4: URL encode redirect_uri to prevent OAuth flow breakage
+        encoded_redirect_uri = urllib.parse.quote(callback_url, safe='')
+        encoded_state = urllib.parse.quote(f"{state},{request.query_params.get('from', 'web')}", safe='')
+
+        redirect_url = (
+            f"https://www.facebook.com/v19.0/dialog/oauth"
+            f"?client_id={settings.FB_APP_ID}"
+            f"&redirect_uri={encoded_redirect_uri}"
+            f"&state={encoded_state}"
+            f"&response_type=code"
+            f"&config_id={settings.WHATSAPP_CONFIG_ID}"
+        )
         
         return Response({"redirect_url": redirect_url})
 
@@ -460,7 +472,20 @@ def whatsapp_callback(request):
     if "access_token" not in data:
         return JsonResponse({"error": "Token exchange failed", "details": data})
 
-    access_token = data["access_token"]
+    short_lived_token = data["access_token"]
+
+    # ✅ Fix 2: Exchange short-lived token for long-lived token
+    exchange_url = "https://graph.facebook.com/v19.0/oauth/access_token"
+    exchange_params = {
+        "grant_type": "fb_exchange_token",
+        "client_id": settings.FB_APP_ID,
+        "client_secret": settings.FB_APP_SECRET,
+        "fb_exchange_token": short_lived_token,
+    }
+    exchange_resp = requests.get(exchange_url, params=exchange_params)
+    exchange_data = exchange_resp.json()
+    access_token = exchange_data.get("access_token", short_lived_token)
+    print(f"🔑 [WhatsApp] Long-lived token obtained: {'yes' if access_token != short_lived_token else 'fallback to short-lived'}")
 
     # Get WhatsApp Business Account details
     # First, get the WABA ID from the debug token or business accounts
@@ -567,7 +592,21 @@ def whatsapp_callback(request):
         })
         
         # For now, only save the first phone number
-    
+
+    # 🔗 Subscribe WABA to receive webhook messages (same pattern as Instagram)
+    try:
+        sub_url = f"https://graph.facebook.com/v19.0/{waba_id}/subscribed_apps"
+        sub_res = requests.post(sub_url, params={
+            "access_token": access_token
+        }).json()
+
+        if sub_res.get("success"):
+            print(f"🔔 [WhatsApp] ✅ Webhook subscription SUCCESS for WABA {waba_id}")
+        else:
+            print(f"⚠️ [WhatsApp] Webhook subscription response: {sub_res}")
+    except Exception as e:
+        print(f"❌ [WhatsApp] Webhook subscription error: {e}")
+
     send_alert(user, "Your WhatsApp account is now connected.")
 
     if _from == "app":
