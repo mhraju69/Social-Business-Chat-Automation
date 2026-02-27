@@ -471,9 +471,15 @@ class AppleLoginView(APIView):
             return Response({'error': 'Invalid identity token'}, status=400)
             
         email = decoded_token.get('email')
-        
+        apple_sub = decoded_token.get('sub')  # Apple unique user ID (always present)
+
+        # ✅ "Hide My Email" users এর জন্য sub দিয়ে fallback
+        # Apple Private Relay email বা sub-based synthetic email ব্যবহার করো
         if not email:
-            return Response({'error': 'Email not provided by Apple'}, status=400)
+            if not apple_sub:
+                return Response({'error': 'Unable to identify Apple user'}, status=400)
+            # sub দিয়ে existing user খোঁজো অথবা synthetic email বানাও
+            email = f"apple_{apple_sub}@privaterelay.appleid.com"
             
         # Try to get name from user_info if provided (first time login)
         name = user_info.get('name', {}).get('firstName', '')

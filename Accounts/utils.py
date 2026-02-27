@@ -10,16 +10,42 @@ from Others.models import UserSession
 import jwt
 from jwt.algorithms import RSAAlgorithm
 
+_apple_keys_cache = {"keys": None, "fetched_at": None}
+
+def _get_apple_public_keys():
+    """Apple public keys cache করে রাখে (1 ঘণ্টা)"""
+    import time
+    now = time.time()
+    if _apple_keys_cache["keys"] and _apple_keys_cache["fetched_at"]:
+        if now - _apple_keys_cache["fetched_at"] < 3600:  # 1 hour cache
+            return _apple_keys_cache["keys"]
+    try:
+        resp = requests.get('https://appleid.apple.com/auth/keys', timeout=5)
+        keys = resp.json().get('keys', [])
+        _apple_keys_cache["keys"] = keys
+        _apple_keys_cache["fetched_at"] = now
+        return keys
+    except Exception as e:
+        print(f"Failed to fetch Apple public keys: {e}")
+        return _apple_keys_cache["keys"] or []  # fallback to old cache
+
 def verify_apple_id_token(token):
     try:
         header = jwt.get_unverified_header(token)
         kid = header.get('kid')
         
-        # Get Apple's public keys
-        apple_keys = requests.get('https://appleid.apple.com/auth/keys').json()
+        # Get Apple's public keys (cached)
+        apple_keys = _get_apple_public_keys()
         
-        # Find the matching key
-        public_key_data = next(key for key in apple_keys['keys'] if key['kid'] == kid)
+        # ✅ Safe lookup — StopIteration crash হবে না
+        public_key_data = next(
+            (key for key in apple_keys if key['kid'] == kid),
+            None
+        )
+        if not public_key_data:
+            print(f"Apple public key not found for kid: {kid}")
+            return None
+
         public_key = RSAAlgorithm.from_jwk(public_key_data)
         
         # Verify the token
