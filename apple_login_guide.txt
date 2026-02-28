@@ -1,0 +1,227 @@
+================================================================
+        APPLE LOGIN SYSTEM - STEP BY STEP GUIDE (বাংলায়)
+================================================================
+
+
+================================================================
+১. APPLE DEVELOPER CONSOLE SETUP
+================================================================
+
+[developer.apple.com] এ যাও
+
+--- Step 1: App ID তৈরি ---
+
+  Certificates, Identifiers & Profiles
+    → Identifiers
+    → (+) বাটন
+    → App IDs → App
+    → Bundle ID দাও (যেমন: com.yourcompany.appname)
+    → Capabilities এ "Sign In with Apple" tick করো
+    → Register করো
+
+
+--- Step 2: Service ID তৈরি (Web এর জন্য) ---
+
+  Identifiers
+    → (+) বাটন
+    → Service IDs
+    → Identifier দাও (যেমন: com.yourcompany.appname.web)
+      ↑↑↑ এটাই হবে তোমার APPLE_CLIENT_ID
+    → "Sign In with Apple" Enable করো → Configure
+    → Primary App ID: তোমার App ID select করো
+    → Domains: তোমার domain যোগ করো (যেমন: api.yourdomain.com)
+    → Return URLs: https://api.yourdomain.com/api/auth/apple/login/
+    → Save → Continue → Register
+
+
+--- Step 3: .env এ set করো ---
+
+  APPLE_CLIENT_ID=com.yourcompany.appname.web
+
+
+================================================================
+২. FLOW কিভাবে কাজ করে
+================================================================
+
+  Frontend             Apple Server          Backend (Django)
+  ─────────            ────────────          ────────────────
+      │                     │                       │
+      │  1. "Sign in        │                       │
+      │     with Apple"     │                       │
+      │     বাটন চাপে       │                       │
+      │────────────────────►│                       │
+      │                     │                       │
+      │  2. Apple login     │                       │
+      │     popup দেখায়    │                       │
+      │◄────────────────────│                       │
+      │                     │                       │
+      │  3. identity_token  │                       │
+      │     পাঠায়           │                       │
+      │◄────────────────────│                       │
+      │                     │                       │
+      │  4. POST /api/auth/apple/login/             │
+      │     { identity_token }─────────────────────►│
+      │                     │                       │
+      │                     │  5. Apple public key  │
+      │                     │◄──────────────────────│
+      │                     │                       │
+      │  6. { access, refresh, user } পাঠায়         │
+      │◄────────────────────────────────────────────│
+
+
+================================================================
+৩. API CALL করার নিয়ম
+================================================================
+
+--- Mobile (iOS/Android) - JSON ---
+
+  POST /api/auth/apple/login/
+  Content-Type: application/json
+
+  {
+    "identity_token": "eyJraWQiOiJXNldjT0tCIiwiYWxnIjoiUlMyNTYifQ...",
+    "user": {
+      "name": {
+        "firstName": "John",
+        "lastName": "Doe"
+      }
+    }
+  }
+
+  ⚠️  NOTE: "user" field শুধু প্রথমবার Apple পাঠায়।
+            পরের বার আর আসে না — এটা Apple-এর behavior।
+
+
+--- Web (Browser) - Apple নিজেই Form POST করে ---
+
+  Apple সরাসরি তোমার Return URL-এ POST পাঠায়:
+
+  POST /api/auth/apple/login/
+  Content-Type: application/x-www-form-urlencoded
+
+  code=...&id_token=eyJ...&state=...&user={"name":{"firstName":"John"}}
+
+  এই ক্ষেত্রে Backend frontend-এ redirect করে:
+  https://yourfrontend.com/auth/callback?access=...&refresh=...&status=success
+
+
+================================================================
+৪. SUCCESSFUL RESPONSE
+================================================================
+
+  {
+    "user": {
+      "id": 42,
+      "email": "john@example.com",
+      "name": "John Doe"
+    },
+    "access": "eyJhbGciOiJIUzI1NiIs...",
+    "refresh": "eyJhbGciOiJIUzI1NiIs...",
+    "plan": false,
+    "session_id": "uuid-here",
+    "permissions": null
+  }
+
+
+================================================================
+৫. iOS SWIFT উদাহরণ
+================================================================
+
+  import AuthenticationServices
+
+  // 1. Login বাটনে
+  let request = ASAuthorizationAppleIDProvider().createRequest()
+  request.requestedScopes = [.fullName, .email]
+
+  let controller = ASAuthorizationController(authorizationRequests: [request])
+  controller.delegate = self
+  controller.presentationContextProvider = self
+  controller.performRequests()
+
+  // 2. Delegate
+  func authorizationController(
+      controller: ASAuthorizationController,
+      didCompleteWithAuthorization authorization: ASAuthorization
+  ) {
+      if let credential = authorization.credential
+                            as? ASAuthorizationAppleIDCredential {
+
+          let identityToken = String(
+              data: credential.identityToken!,
+              encoding: .utf8
+          )!
+
+          // 3. Backend-এ পাঠাও
+          let body: [String: Any] = [
+              "identity_token": identityToken,
+              "user": [
+                  "name": [
+                      "firstName": credential.fullName?.givenName ?? "",
+                      "lastName":  credential.fullName?.familyName ?? ""
+                  ]
+              ]
+          ]
+          // POST to /api/auth/apple/login/
+      }
+  }
+
+
+================================================================
+৬. FRONTEND (WEB) JAVASCRIPT উদাহরণ
+================================================================
+
+  // Apple JS SDK দিয়ে
+  AppleID.auth.init({
+      clientId:    'com.yourcompany.appname.web',  // Service ID
+      scope:       'name email',
+      redirectURI: 'https://api.yourdomain.com/api/auth/apple/login/',
+      usePopup:    false  // false = redirect flow (Apple নিজে POST করবে)
+  });
+
+  document.getElementById('apple-btn').addEventListener('click', () => {
+      AppleID.auth.signIn();
+  });
+
+  // HTML-এ Apple SDK যোগ করো:
+  <script src="https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js"></script>
+
+
+================================================================
+৭. CHECKLIST
+================================================================
+
+  [ ] Apple Developer Account আছে
+  [ ] App ID তৈরি + Sign In with Apple enable করা হয়েছে
+  [ ] Service ID তৈরি (web এর জন্য)
+  [ ] Return URL এ backend URL দেওয়া হয়েছে
+  [ ] APPLE_CLIENT_ID=Service ID → .env এ set করা হয়েছে
+  [✓] Backend URL: POST /api/auth/apple/login/ → already done
+  [ ] Frontend callback page (/auth/callback) তৈরি করতে হবে
+
+
+================================================================
+⚠️  IMPORTANT NOTES
+================================================================
+
+  1. APPLE_CLIENT_ID:
+       - iOS App:  Bundle ID ব্যবহার করো
+       - Web App:  Service ID ব্যবহার করো
+       - দুটো আলাদা value! সবচেয়ে common mistake এটাই।
+
+  2. "Hide My Email" (Private Relay):
+       - User যদি Apple এর Hide My Email ব্যবহার করে,
+         তাহলে email আসবে না।
+       - Backend এ Apple "sub" (unique user ID) দিয়ে
+         synthetic email তৈরি হবে:
+         apple_{sub}@privaterelay.appleid.com
+
+  3. User Info (name):
+       - Apple শুধু প্রথমবার name পাঠায়।
+       - পরের login এ আর আসবে না।
+       - প্রথমবারেই name save করে রাখতে হবে।
+
+  4. Token Verification:
+       - Apple public keys 1 ঘণ্টা cache হয়।
+       - Token expire হলে নতুন login করতে হবে।
+
+================================================================
