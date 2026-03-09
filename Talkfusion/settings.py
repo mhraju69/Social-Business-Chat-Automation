@@ -51,9 +51,6 @@ CORS_ALLOWED_ALL_ORIGINS = True
 
 from corsheaders.defaults import default_headers
 
-CORS_ALLOW_HEADERS = list(default_headers) + [
-    "x-client-info",
-]
 # DEBUG = True
 #DEBUG = False
 # Application definition
@@ -263,6 +260,7 @@ from corsheaders.defaults import default_headers
 
 CORS_ALLOW_HEADERS = list(default_headers) + [
     'ngrok-skip-browser-warning',
+      "x-client-info",
 ]
 
 # AWS S3 Configuration
