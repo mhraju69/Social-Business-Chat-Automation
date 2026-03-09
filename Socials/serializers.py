@@ -3,6 +3,8 @@ from .models import *
 from Ai.tasks import analyze_company_data
 from Accounts.models import Company
 from Socials.consumers import send_alert
+from Finance.models import Subscriptions
+from django.utils import timezone
 
 class ChatProfileSerializers(ModelSerializer):
     class Meta:
