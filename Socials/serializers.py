@@ -25,7 +25,7 @@ class ChatProfileSerializers(ModelSerializer):
             raise ValidationError(
                 "Your account is not approved by the admin. Please wait for the approval."
             )
-        elif validated_data.get('bot_active') == True and not Subscriptions.objects.filter(company=company, end_date__gt=timezone.now()).exists():
+        elif validated_data.get('bot_active') == True and not Subscriptions.objects.filter(company=company, end__gt=timezone.now()).exists():
             raise ValidationError(
                 "You don't have any active subscription. Please subscribe to continue using our automation services."
             )
