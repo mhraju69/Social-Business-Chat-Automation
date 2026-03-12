@@ -764,8 +764,8 @@ class ChangeTicketStatus(APIView):
     permission_classes = [IsAdmin]
 
     def patch(self, request):
-        ticket_id = request.query_params.get("id")
-        new_status = request.data.get("status")
+        ticket_id = request.query_params.get("ticket")
+        new_status = request.query_params.get("status")
 
         if not ticket_id:
             return Response(
