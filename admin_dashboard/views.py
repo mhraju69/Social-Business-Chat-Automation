@@ -779,7 +779,7 @@ class ChangeTicketStatus(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        ticket = SupportTicket.objects.filter(Q(id=id) | Q(ticket_id=id)).first()
+        ticket = SupportTicket.objects.filter(Q(id=ticket_id) | Q(ticket_id=ticket_id)).first()
 
         if not ticket:
             return Response({"error":"Ticket not found"}, status = status.HTTP_404_NOT_FOUND)
