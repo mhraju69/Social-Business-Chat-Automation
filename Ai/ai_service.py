@@ -192,6 +192,45 @@ def get_available_slots(company_id: int, date_str: str = None, duration_minutes:
         import traceback
         traceback.print_exc()
         return []
+    
+
+def map_payment_error(error_text: str) -> str:
+    error_text = (error_text or "").strip()
+
+    mapping = {
+        "Company not found": "This business could not be found.",
+        "Company is unable to receive payments due to missing Stripe customer ID": "Online payment is not available right now.",
+        "Company is unable to receive payments due to missing Stripe payment method": "Online payment is not available right now.",
+        "Email is required for service payments": "I need your email address to create a payment link.",
+        "Invalid amount for service payment": "I could not prepare the payment amount.",
+    }
+
+    return mapping.get(error_text, "I could not create the payment link right now.")
+
+
+def rewrite_user_message_in_same_language(llm, user_query: str, safe_message: str, tone: str = "professional") -> str:
+    try:
+        prompt = ChatPromptTemplate.from_template("""
+You are a customer support representative.
+
+Rewrite the following message in the SAME language as the user's message.
+Keep the meaning the same.
+Keep it short, natural, and customer-friendly.
+Do not mention internal systems, exceptions, backend logic, Stripe setup, or technical details.
+
+Tone: {tone}
+User message: {user_query}
+Message to rewrite: {safe_message}
+""")
+        chain = prompt | llm
+        response = chain.invoke({
+            "tone": tone,
+            "user_query": user_query,
+            "safe_message": safe_message,
+        })
+        return response.content.strip()
+    except Exception:
+        return safe_message
 
 def get_multi_day_availability(company_id: int, days: int = 7, duration_minutes: int = 60, service_obj=None) -> Dict[str, List[str]]:
     """Get availability for the next N days"""
@@ -250,7 +289,14 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
         query_vector = embeddings.embed_query(query)
     except Exception as e:
         logger.error(f"Embedding failed: {e}")
-        return {"content": "I'm having trouble understanding that right now.", "token_usage": {}}
+        safe_message = "I'm having trouble understanding that right now."
+        localized_message = rewrite_user_message_in_same_language(
+            llm=llm,
+            user_query=query,
+            safe_message=safe_message,
+            tone=tone
+        )
+        return {"content": localized_message, "token_usage": {}}
         
     search_filter = rest.Filter(
         must=[
@@ -654,7 +700,7 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
             You just spoke to this user recently.
             Do NOT use any salutations like "Hello", "Hi", "Greetings", or "Good morning".
             Do NOT repeat "How can I help you?".
-            Be direct and concise. If the user only said "Hi", just acknowledge briefly like "Yes?".
+            Be direct and concise. If the user only said "Hi", respond briefly as a continuation of the conversation.
             """
 
     response = chain.invoke({
@@ -833,14 +879,20 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
 
                 # Check if it returned JSON again (loop), if so, force text
                 if "action" in response_text and "check_availability" in response_text:
-                     deduct_tokens_now()
-                     # Clean up system_msg for user display
-                     clean_msg = system_msg.replace("System Info: Availability Report:", "").strip()
-                     return {
-                         "content": f"Here are the available slots:\n{clean_msg}",
-                         "token_usage": token_usage
-                     }
-                
+     # Clean up system_msg for user display
+                    clean_msg = system_msg.replace("System Info: Availability Report:", "").strip()
+                    safe_message = f"Here are the available slots:\n{clean_msg}"
+                    localized_message = rewrite_user_message_in_same_language(
+                        llm=llm,
+                        user_query=query,
+                        safe_message=safe_message,
+                        tone=tone
+                    )
+                    deduct_tokens_now()
+                    return {
+                        "content": localized_message,
+                        "token_usage": token_usage
+                    }
                 deduct_tokens_now()
                 return {
                     "content": response_text,
@@ -877,11 +929,18 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                              now_aware = django_timezone.now()
                              
                              if s_time_aware < now_aware:
-                                 deduct_tokens_now()
-                                 return {
-                                     "content": f"I cannot book appointments in the past ({start_time_str}). Please search for a future time slot.",
-                                     "token_usage": token_usage
-                                 }
+                                safe_message = f"I cannot book appointments in the past ({start_time_str}). Please search for a future time slot."
+                                localized_message = rewrite_user_message_in_same_language(
+                                    llm=llm,
+                                    user_query=query,
+                                    safe_message=safe_message,
+                                    tone=tone
+                                )
+                                deduct_tokens_now()
+                                return {
+                                    "content": localized_message,
+                                    "token_usage": token_usage
+                                }
                     except Exception as e:
                         # If format is weird, maybe let backend handle or fail safe?
                         logger.error(f"Date validation error: {e}")
@@ -896,29 +955,54 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                     booking = create_booking(mock_req, company_id)
                     # Assuming create_booking returns a Booking object or Response
                     if hasattr(booking, 'id'):
-                         # Show local time in the confirmation message using utility function
-                         from Others.helper import utc_to_local
-                         timezone_str = company.timezone if (company and company.timezone) else 'UTC'
-                         local_time = utc_to_local(booking.start_time, timezone_str)
-                         formatted_time = local_time.strftime('%Y-%m-%d %I:%M %p')
-                         
-                         deduct_tokens_now()
-                         return {
-                             "content": f"Booking confirmed! Your appointment for {booking.title} is set for {formatted_time}. Would you like to pay online now or pay later?",
-                             "token_usage": token_usage
-                         }
+                        # Show local time in the confirmation message using utility function
+                        from Others.helper import utc_to_local
+                        timezone_str = company.timezone if (company and company.timezone) else 'UTC'
+                        local_time = utc_to_local(booking.start_time, timezone_str)
+                        formatted_time = local_time.strftime('%Y-%m-%d %I:%M %p')
+
+                        safe_message = (
+                            f"Booking confirmed! Your appointment for {booking.title} is set for {formatted_time}. "
+                            f"Would you like to pay online now or pay later?"
+                        )
+                        localized_message = rewrite_user_message_in_same_language(
+                            llm=llm,
+                            user_query=query,
+                            safe_message=safe_message,
+                            tone=tone
+                        )
+
+                        deduct_tokens_now()
+                        return {
+                            "content": localized_message,
+                            "token_usage": token_usage
+                        }
                     else:
-                         # It might return a Response object with errors
-                         deduct_tokens_now()
-                         return {
-                             "content": "I encountered an issue processing your booking. Please try again.",
-                             "token_usage": token_usage
-                         }
+        
+                        safe_message = "I encountered an issue processing your booking. Please try again."
+                        localized_message = rewrite_user_message_in_same_language(
+                            llm=llm,
+                            user_query=query,
+                            safe_message=safe_message,
+                            tone=tone
+                        )
+                        deduct_tokens_now()
+                        return {
+                            "content": localized_message,
+                            "token_usage": token_usage
+                        }
                 except Exception as e:
                     logger.error(f"Booking creation failed: {e}")
+                    safe_message = "Sorry, I couldn't complete the booking at this moment."
+                    localized_message = rewrite_user_message_in_same_language(
+                        llm=llm,
+                        user_query=query,
+                        safe_message=safe_message,
+                        tone=tone
+                    )
                     deduct_tokens_now()
                     return {
-                        "content": "Sorry, I couldn't complete the booking at this moment.",
+                        "content": localized_message,
                         "token_usage": token_usage
                     }
 
@@ -929,10 +1013,16 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                 address = payment_data.get("address", "")
                 
                 if not items or not email:
-                    # Missing info, prompt user back
+                     safe_message = "I need both the list of items and your email address to generate a payment link."
+                     localized_message = rewrite_user_message_in_same_language(
+                         llm=llm,
+                         user_query=query,
+                         safe_message=safe_message,
+                         tone=tone
+                     )
                      deduct_tokens_now()
                      return {
-                         "content": "I need both the list of items and your email address to generate a payment link.",
+                         "content": localized_message,
                          "token_usage": token_usage
                      }
 
@@ -969,11 +1059,18 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                         print(f"Warning: Could not match item '{item_name}' to any service.")
                 
                 if total_amount <= 0:
-                     deduct_tokens_now()
-                     return {
-                         "content": "I couldn't find the specific prices for those items. Please verify the exact service names.",
-                         "token_usage": token_usage
-                     }
+                    safe_message = "I couldn't find the specific prices for those items. Please verify the exact service names."
+                    localized_message = rewrite_user_message_in_same_language(
+                        llm=llm,
+                        user_query=query,
+                        safe_message=safe_message,
+                        tone=tone
+                    )
+                    deduct_tokens_now()
+                    return {
+                        "content": localized_message,
+                        "token_usage": token_usage
+                    }
 
                 reason = ", ".join(valid_items)
                 if address:
@@ -988,28 +1085,61 @@ def get_ai_response(company_id: int, query: str, history: Optional[List[Dict]] =
                     )
                     
                     if payment and payment.url:
+                        safe_message = (
+                            f"Here is your payment link for {reason} (Total: €{total_amount}):\n"
+                            f"{payment.url}\n\n"
+                            f"Please complete the payment to proceed."
+                        )
+                        localized_message = rewrite_user_message_in_same_language(
+                            llm=llm,
+                            user_query=query,
+                            safe_message=safe_message,
+                            tone=tone
+                        )
+
                         deduct_tokens_now()
                         return {
-                            "content": f"Here is your payment link for {reason} (Total: €{total_amount}):\n{payment.url}\n\nPlease complete the payment to proceed.",
+                            "content": localized_message,
                             "token_usage": token_usage
                         }
                     else:
+                        safe_message = "I wasn't able to generate the payment link correctly. Please try again later."
+                        localized_message = rewrite_user_message_in_same_language(
+                            llm=llm,
+                            user_query=query,
+                            safe_message=safe_message,
+                            tone=tone
+                        )
                         deduct_tokens_now()
                         return {
-                            "content": "I wasn't able to generate the payment link correctly. Please try again later.",
+                            "content": localized_message,
                             "token_usage": token_usage
                         }
                 except ValueError as e:
+                     safe_message = map_payment_error(str(e))
+                     localized_message = rewrite_user_message_in_same_language(
+                         llm=llm,
+                         user_query=query,
+                         safe_message=safe_message,
+                         tone=tone
+                     )
                      deduct_tokens_now()
                      return {
-                         "content": f"I couldn't generate the link: {str(e)}",
+                         "content": localized_message,
                          "token_usage": token_usage
                      }
                 except Exception as e:
                      logger.error(f"Payment Link Generation Error: {e}")
+                     safe_message = "I could not create the payment link right now. Please try again in a moment."
+                     localized_message = rewrite_user_message_in_same_language(
+                         llm=llm,
+                         user_query=query,
+                         safe_message=safe_message,
+                         tone=tone
+                     )
                      deduct_tokens_now()
                      return {
-                         "content": "An internal error occurred while generating the payment link.",
+                         "content": localized_message,
                          "token_usage": token_usage
                      }
 
