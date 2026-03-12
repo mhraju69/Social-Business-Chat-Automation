@@ -184,7 +184,7 @@ class SupportTicket(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return self.subject
+        return self.user
     
     def generate_ticket_id(self):
         while True:
