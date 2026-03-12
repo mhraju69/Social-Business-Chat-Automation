@@ -78,7 +78,7 @@ class DashboardView(generics.GenericAPIView):
 
         tickets = SupportTicket.objects.filter(
             Q(status='open') | Q(status='in_progress')
-        )[:5]
+        ).order_by('-created_at')[:5]
 
         # Show chart data for last 6 months
         chart_data = []
