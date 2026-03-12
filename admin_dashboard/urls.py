@@ -22,4 +22,6 @@ urlpatterns = [
     path('user-plan-requests/', views.UserPlanRequestListView.as_view(), name='user-plan-requests'),
     path('request-custom-plan/', views.RequestCustomPlanView.as_view(), name='request-custom-plan'),
     path('approve-user-plan/', views.ApproveUserPlanRequestView.as_view(), name='approve-user-plan'),
+
+    path('change-ticket-status/', views.ChangeTicketStatus.as_view(), name='change-ticket-status'),
 ]

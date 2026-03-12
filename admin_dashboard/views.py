@@ -757,3 +757,46 @@ class ApproveUserPlanRequestView(generics.GenericAPIView):
                 status=400
             )
 
+
+class ChangeTicketStatus(APIView):
+    permission_classes = [IsAdmin]
+
+    def patch(self, request):
+        ticket_id = request.query_params.get("id")
+        new_status = request.data.get("status")
+
+        if not ticket_id:
+            return Response(
+                {"error": "Ticket id is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not new_status:
+            return Response(
+                {"error": "Status is required"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        ticket = SupportTicket.objects.filter(Q(id=id) | Q(ticket_id=id)).first()
+
+        if not ticket:
+            return Response({"error":"Ticket not found"}, status = status.HTTP_404_NOT_FOUND)
+
+        try:
+            ticket.status = new_status
+            ticket.save()
+
+            return Response(
+                SupportTicketSerializer(ticket).data,
+                status=status.HTTP_200_OK
+            )
+
+        except Exception as e:
+            return Response(
+                {"error": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        
+
+        
